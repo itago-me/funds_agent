@@ -10,6 +10,7 @@ from src.llm_analyzer import build_llm_report, is_llm_available
 from src.report_writer import write_report
 from src.risk_analyzer import enrich_funds_with_risk
 from src.simple_analyzer import build_report
+from src.watchlist_loader import load_watchlist_codes
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,15 +30,29 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Try to load real fund data from AkShare. Falls back to sample data if unavailable.",
     )
+    parser.add_argument(
+        "--use-watchlist",
+        action="store_true",
+        help="Load fund codes from watchlist.json when --codes is not provided.",
+    )
     return parser.parse_args()
+
+
+def resolve_fund_codes(args: argparse.Namespace) -> list[str] | None:
+    if args.codes:
+        return args.codes
+    if args.use_watchlist:
+        return load_watchlist_codes()
+    return None
 
 
 def main() -> None:
     load_dotenv()
     args = parse_args()
     report_date = date.today()
+    selected_codes = resolve_fund_codes(args)
     funds, data_source = load_funds(
-        selected_codes=args.codes,
+        selected_codes=selected_codes,
         prefer_real_data=args.use_real_data,
     )
     funds = enrich_funds_with_risk(funds)
@@ -53,6 +68,8 @@ def main() -> None:
             print("analysis mode: rule mode")
 
     print(f"data source: {data_source}")
+    if selected_codes:
+        print(f"fund codes: {', '.join(selected_codes)}")
     report_path = write_report(content=report, report_date=report_date)
     print("今日基金分析报道:")
     print(report)

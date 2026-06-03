@@ -33,6 +33,7 @@
 - DeepSeek LLM 分析接入
 - AkShare 真实基金数据接入
 - 基础风险提示
+- Watchlist 自选基金列表
 
 ## 核心能力规划
 
@@ -62,6 +63,7 @@ funds_agent/
 ├── README.md
 ├── main.py
 ├── requirements.txt
+├── watchlist.json
 ├── docs/
 ├── src/
 │   ├── data_loader.py
@@ -96,6 +98,7 @@ funds_agent/
 - 可以通过参数切换是否使用 LLM
 - 可以尝试使用真实基金数据，并在失败时回退到示例数据
 - 报告会展示净值日期、风险等级和变化摘要
+- 可以通过 `watchlist.json` 管理自选基金列表
 
 ## GitHub 展示重点
 
@@ -125,6 +128,8 @@ python main.py --codes 000001
 python main.py --codes 000001 --use-llm
 python main.py --codes 000001 --use-real-data
 python main.py --codes 000001 --use-real-data --use-llm
+python main.py --use-watchlist
+python main.py --use-watchlist --use-real-data --use-llm
 ```
 
 ## 环境变量
@@ -144,5 +149,15 @@ DEEPSEEK_API_KEY=your_deepseek_api_key_here
 如果设置了 `DEEPSEEK_API_KEY`，可以加上 `--use-llm` 参数调用 DeepSeek 生成分析；如果没有设置，项目仍然会继续使用当前的规则分析版本。
 
 如果安装了 `akshare`，可以加上 `--use-real-data` 参数尝试获取真实基金数据。当前版本只在你传入基金代码时尝试获取真实数据；如果接口不可用、依赖未安装或基金代码无效，程序会自动回退到本地示例数据。
+
+如果不想每次手动输入基金代码，可以维护 `watchlist.json`：
+
+```json
+{
+  "fund_codes": ["000001", "000002"]
+}
+```
+
+使用 `--use-watchlist` 时，程序会从这个文件读取基金代码。优先级是：`--codes` 命令行参数优先，其次是 `--use-watchlist`，两者都没有时使用全部示例数据。
 
 后续遇到数据源选择、提示词设计、代码拆分、报告模板和迭代顺序等问题，可以继续在这个仓库里逐步完善。
