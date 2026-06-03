@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from src.data_loader import load_funds
 from src.llm_analyzer import build_llm_report, is_llm_available
 from src.report_writer import write_report
+from src.risk_analyzer import enrich_funds_with_risk
 from src.simple_analyzer import build_report
 
 
@@ -23,6 +24,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use the DeepSeek model to generate the report when DEEPSEEK_API_KEY is set.",
     )
+    parser.add_argument(
+        "--use-real-data",
+        action="store_true",
+        help="Try to load real fund data from AkShare. Falls back to sample data if unavailable.",
+    )
     return parser.parse_args()
 
 
@@ -30,7 +36,11 @@ def main() -> None:
     load_dotenv()
     args = parse_args()
     report_date = date.today()
-    funds = load_funds(selected_codes=args.codes)
+    funds, data_source = load_funds(
+        selected_codes=args.codes,
+        prefer_real_data=args.use_real_data,
+    )
+    funds = enrich_funds_with_risk(funds)
 
     if args.use_llm and is_llm_available():
         report = build_llm_report(funds=funds, report_date=report_date)
@@ -42,6 +52,7 @@ def main() -> None:
         else:
             print("analysis mode: rule mode")
 
+    print(f"data source: {data_source}")
     report_path = write_report(content=report, report_date=report_date)
     print("今日基金分析报道:")
     print(report)

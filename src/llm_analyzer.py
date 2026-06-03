@@ -42,7 +42,10 @@ def build_prompt(funds: list[dict[str, object]], report_date: date) -> str:
                 f"Fund Code: {fund['fund_code']}, "
                 f"Theme: {fund['theme']}, "
                 f"NAV: {fund['nav']}, "
-                f"Daily Change: {fund['daily_change_percent']}%"
+                f"NAV Date: {fund.get('nav_date', 'unknown')}, "
+                f"Daily Change: {fund['daily_change_percent']}%, "
+                f"Risk Level: {fund.get('risk_level', 'unknown')}, "
+                f"Change Summary: {fund.get('change_summary', 'No summary')}"
             )
         )
 
@@ -54,7 +57,8 @@ Write a short daily markdown report for {report_date.isoformat()} using the fund
 Requirements:
 - Use markdown.
 - Keep the report concise and easy to understand.
-- For each fund, include a short explanation of today's move.
+- For each fund, include NAV date, daily change, risk level, and a short explanation.
+- Clearly explain that the risk level is a simple rule-based signal, not a professional risk rating.
 - Mention that the content is for learning and informational use only.
 - Do not give direct buy or sell instructions.
 

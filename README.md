@@ -31,6 +31,8 @@
 - 模块拆分
 - Markdown 报告输出
 - DeepSeek LLM 分析接入
+- AkShare 真实基金数据接入
+- 基础风险提示
 
 ## 核心能力规划
 
@@ -84,13 +86,16 @@ funds_agent/
 
 1. 输入基金代码
 2. 读取示例数据
-3. 生成基础分析或 LLM 分析
-4. 输出 Markdown 报告
+3. 生成基础风险提示
+4. 生成基础分析或 LLM 分析
+5. 输出 Markdown 报告
 
 现在新增了一个小改进：
 
 - 可以通过命令行只生成指定基金的报告
 - 可以通过参数切换是否使用 LLM
+- 可以尝试使用真实基金数据，并在失败时回退到示例数据
+- 报告会展示净值日期、风险等级和变化摘要
 
 ## GitHub 展示重点
 
@@ -118,6 +123,8 @@ funds_agent/
 python main.py
 python main.py --codes 000001
 python main.py --codes 000001 --use-llm
+python main.py --codes 000001 --use-real-data
+python main.py --codes 000001 --use-real-data --use-llm
 ```
 
 ## 环境变量
@@ -135,5 +142,7 @@ DEEPSEEK_API_KEY=your_deepseek_api_key_here
 当前版本已经可以直接从 `sample_data/funds.json` 读取示例基金数据，并把报告输出到 `reports/` 目录。`main.py` 负责流程控制，`src/` 里的小模块分别负责读取数据、生成分析和写报告。
 
 如果设置了 `DEEPSEEK_API_KEY`，可以加上 `--use-llm` 参数调用 DeepSeek 生成分析；如果没有设置，项目仍然会继续使用当前的规则分析版本。
+
+如果安装了 `akshare`，可以加上 `--use-real-data` 参数尝试获取真实基金数据。当前版本只在你传入基金代码时尝试获取真实数据；如果接口不可用、依赖未安装或基金代码无效，程序会自动回退到本地示例数据。
 
 后续遇到数据源选择、提示词设计、代码拆分、报告模板和迭代顺序等问题，可以继续在这个仓库里逐步完善。
