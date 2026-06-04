@@ -12,14 +12,20 @@ SAMPLE_DATA_PATH = BASE_DIR / "sample_data" / "funds.json"
 def load_funds(
     selected_codes: list[str] | None = None,
     prefer_real_data: bool = False,
-) -> tuple[list[dict[str, object]], str]:
+) -> tuple[list[dict[str, object]], str, list[str]]:
+    warnings: list[str] = []
     if prefer_real_data and selected_codes:
-        real_funds = load_real_funds(selected_codes=selected_codes)
+        real_funds, real_warnings = load_real_funds(selected_codes=selected_codes)
+        warnings.extend(real_warnings)
         if real_funds:
-            return real_funds, "akshare"
+            return real_funds, "akshare", warnings
 
     sample_funds = load_sample_funds(selected_codes=selected_codes)
-    return sample_funds, "sample_data"
+    if prefer_real_data:
+        warnings.append("Real data unavailable. Falling back to sample_data.")
+    if selected_codes and not sample_funds:
+        warnings.append("No matching sample funds found for the selected codes.")
+    return sample_funds, "sample_data", warnings
 
 
 def load_sample_funds(selected_codes: list[str] | None = None) -> list[dict[str, object]]:
@@ -33,19 +39,21 @@ def load_sample_funds(selected_codes: list[str] | None = None) -> list[dict[str,
     return [fund for fund in funds if str(fund["fund_code"]) in selected]
 
 
-def load_real_funds(selected_codes: list[str]) -> list[dict[str, object]]:
+def load_real_funds(selected_codes: list[str]) -> tuple[list[dict[str, object]], list[str]]:
     try:
         import akshare as ak
     except ImportError:
-        return []
+        return [], ["AkShare is not installed. Run: pip install -r requirements.txt"]
 
     funds: list[dict[str, object]] = []
+    warnings: list[str] = []
     for code in selected_codes:
         try:
             funds.append(fetch_real_fund(ak=ak, fund_code=code))
-        except Exception:
+        except Exception as exc:
+            warnings.append(f"Failed to load real data for {code}: {exc}")
             continue
-    return funds
+    return funds, warnings
 
 
 def fetch_real_fund(ak: Any, fund_code: str) -> dict[str, object]:

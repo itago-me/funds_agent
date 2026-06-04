@@ -51,15 +51,20 @@ def main() -> None:
     args = parse_args()
     report_date = date.today()
     selected_codes = resolve_fund_codes(args)
-    funds, data_source = load_funds(
+    funds, data_source, warnings = load_funds(
         selected_codes=selected_codes,
         prefer_real_data=args.use_real_data,
     )
     funds = enrich_funds_with_risk(funds)
 
     if args.use_llm and is_llm_available():
-        report = build_llm_report(funds=funds, report_date=report_date)
-        print("analysis mode: deepseek llm")
+        try:
+            report = build_llm_report(funds=funds, report_date=report_date)
+            print("analysis mode: deepseek llm")
+        except Exception as exc:
+            warnings.append(f"DeepSeek request failed. Falling back to rule mode: {exc}")
+            report = build_report(funds=funds, report_date=report_date)
+            print("analysis mode: fallback rule mode (DeepSeek request failed)")
     else:
         report = build_report(funds=funds, report_date=report_date)
         if args.use_llm:
@@ -70,6 +75,8 @@ def main() -> None:
     print(f"data source: {data_source}")
     if selected_codes:
         print(f"fund codes: {', '.join(selected_codes)}")
+    for warning in warnings:
+        print(f"warning: {warning}")
     report_path = write_report(content=report, report_date=report_date)
     print("今日基金分析报道:")
     print(report)
