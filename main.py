@@ -6,6 +6,11 @@ from datetime import date
 from dotenv import load_dotenv
 
 from src.data_loader import load_funds
+from src.fund_snapshot_store import (
+    append_fund_snapshots,
+    enrich_funds_with_snapshot_comparison,
+    load_latest_snapshots_by_code,
+)
 from src.llm_analyzer import build_llm_report, is_llm_available
 from src.report_index import (
     append_report_index,
@@ -61,6 +66,11 @@ def main() -> None:
         prefer_real_data=args.use_real_data,
     )
     funds = enrich_funds_with_risk(funds)
+    previous_snapshots = load_latest_snapshots_by_code()
+    funds = enrich_funds_with_snapshot_comparison(
+        funds=funds,
+        previous_snapshots=previous_snapshots,
+    )
 
     analysis_mode = "rule"
     previous_record = load_latest_report_record()
@@ -121,6 +131,11 @@ def main() -> None:
     for warning in warnings:
         print(f"warning: {warning}")
     report_path = write_report(content=report, report_date=report_date)
+    append_fund_snapshots(
+        funds=funds,
+        report_date=report_date.isoformat(),
+        data_source=data_source,
+    )
     append_report_index(
         report_path=report_path,
         report_date=report_date.isoformat(),

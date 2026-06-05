@@ -42,6 +42,12 @@ def build_report(
         nav_date = str(fund.get("nav_date", report_date.isoformat()))
         risk_level = str(fund.get("risk_level", "unknown"))
         change_summary = str(fund.get("change_summary", "No change summary available."))
+        snapshot_comparison = fund.get("snapshot_comparison", {})
+        snapshot_summary = (
+            str(snapshot_comparison.get("summary"))
+            if isinstance(snapshot_comparison, dict)
+            else "No snapshot comparison available."
+        )
         direction = "rose" if change >= 0 else "fell"
 
         lines.extend(
@@ -53,6 +59,7 @@ def build_report(
                 f"- Daily Change: {change:.2f}%",
                 f"- Risk Level: {risk_level}",
                 f"- Change Summary: {change_summary}",
+                f"- Snapshot Comparison: {snapshot_summary}",
                 (
                     f"- Simple Analysis: {name} {direction} {abs(change):.2f}% today. "
                     "Review the NAV date and risk level before drawing conclusions."
