@@ -7,6 +7,11 @@ from dotenv import load_dotenv
 
 from src.data_loader import load_funds
 from src.llm_analyzer import build_llm_report, is_llm_available
+from src.report_index import (
+    append_report_index,
+    build_history_comparison,
+    load_latest_report_record,
+)
 from src.report_writer import write_report
 from src.risk_analyzer import enrich_funds_with_risk
 from src.simple_analyzer import build_report
@@ -57,20 +62,58 @@ def main() -> None:
     )
     funds = enrich_funds_with_risk(funds)
 
+    analysis_mode = "rule"
+    previous_record = load_latest_report_record()
     if args.use_llm and is_llm_available():
         try:
-            report = build_llm_report(funds=funds, report_date=report_date)
+            analysis_mode = "deepseek_llm"
+            history_comparison = build_history_comparison(
+                previous_record=previous_record,
+                current_data_source=data_source,
+                current_analysis_mode=analysis_mode,
+                current_fund_codes=selected_codes,
+                current_warnings=warnings,
+            )
+            report = build_llm_report(
+                funds=funds,
+                report_date=report_date,
+                history_comparison=history_comparison,
+            )
             print("analysis mode: deepseek llm")
         except Exception as exc:
             warnings.append(f"DeepSeek request failed. Falling back to rule mode: {exc}")
-            report = build_report(funds=funds, report_date=report_date)
+            analysis_mode = "rule_fallback"
+            history_comparison = build_history_comparison(
+                previous_record=previous_record,
+                current_data_source=data_source,
+                current_analysis_mode=analysis_mode,
+                current_fund_codes=selected_codes,
+                current_warnings=warnings,
+            )
+            report = build_report(
+                funds=funds,
+                report_date=report_date,
+                history_comparison=history_comparison,
+            )
             print("analysis mode: fallback rule mode (DeepSeek request failed)")
     else:
-        report = build_report(funds=funds, report_date=report_date)
         if args.use_llm:
+            analysis_mode = "rule_fallback"
             print("analysis mode: fallback rule mode (missing DEEPSEEK_API_KEY)")
         else:
             print("analysis mode: rule mode")
+        history_comparison = build_history_comparison(
+            previous_record=previous_record,
+            current_data_source=data_source,
+            current_analysis_mode=analysis_mode,
+            current_fund_codes=selected_codes,
+            current_warnings=warnings,
+        )
+        report = build_report(
+            funds=funds,
+            report_date=report_date,
+            history_comparison=history_comparison,
+        )
 
     print(f"data source: {data_source}")
     if selected_codes:
@@ -78,6 +121,15 @@ def main() -> None:
     for warning in warnings:
         print(f"warning: {warning}")
     report_path = write_report(content=report, report_date=report_date)
+    append_report_index(
+        report_path=report_path,
+        report_date=report_date.isoformat(),
+        data_source=data_source,
+        analysis_mode=analysis_mode,
+        fund_codes=selected_codes,
+        warnings=warnings,
+        history_comparison=history_comparison,
+    )
     print("今日基金分析报道:")
     print(report)
     print(f"Report created: {report_path}")

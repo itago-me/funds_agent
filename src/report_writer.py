@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-REPORTS_DIR = BASE_DIR / "reports"
+REPORTS_DIR = BASE_DIR / "reports" / "daily_reports"
 
 
 def write_report(content: str, report_date: date) -> Path:

@@ -3,13 +3,25 @@ from __future__ import annotations
 from datetime import date
 
 
-def build_report(funds: list[dict[str, object]], report_date: date) -> str:
+def build_report(
+    funds: list[dict[str, object]],
+    report_date: date,
+    history_comparison: dict[str, object] | None = None,
+) -> str:
     lines = [
         f"# Fund Daily Report - {report_date.isoformat()}",
         "",
         "> This report is for learning and informational use only. It is not investment advice.",
         "",
     ]
+    if history_comparison:
+        lines.extend(
+            [
+                "## History Comparison",
+                f"- {history_comparison.get('summary', 'No comparison available.')}",
+                "",
+            ]
+        )
 
     if not funds:
         lines.extend(
