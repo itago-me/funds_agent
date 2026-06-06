@@ -4,6 +4,8 @@ import os
 from datetime import date
 from openai import OpenAI
 
+from src.report_template import build_llm_template_instruction
+
 
 def is_llm_available() -> bool:
     return bool(os.getenv("DEEPSEEK_API_KEY"))
@@ -81,12 +83,11 @@ Write a short daily markdown report for {report_date.isoformat()} using the fund
 Requirements:
 - Use markdown.
 - Keep the report concise and easy to understand.
-- For each fund, include NAV date, daily change, risk level, and a short explanation.
-- Include each fund's snapshot comparison when available.
-- Include a brief history comparison section using the provided history summary.
-- Clearly explain that the risk level is a simple rule-based signal, not a professional risk rating.
-- Mention that the content is for learning and informational use only.
+- Follow the template structure below.
 - Do not give direct buy or sell instructions.
+
+Template:
+{build_llm_template_instruction()}
 
 History summary:
 {history_summary}
