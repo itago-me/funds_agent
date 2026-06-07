@@ -32,8 +32,13 @@
 - Markdown 报告输出
 - DeepSeek LLM 分析接入
 - AkShare 真实基金数据接入
+- AkShare 历史净值指标增强
 - 基础风险提示
 - Watchlist 自选基金列表
+- 历史报告索引
+- 历史对比分析
+- 基金数据历史快照
+- 统一报告模板
 
 ## 核心能力规划
 
@@ -98,8 +103,13 @@ funds_agent/
 - 可以通过参数切换是否使用 LLM
 - 可以尝试使用真实基金数据，并在失败时回退到示例数据
 - 报告会展示净值日期、风险等级和变化摘要
+- 报告会展示 7 日收益、30 日收益、7 日趋势、7 日最大波动和 30 日回撤
 - 可以通过 `watchlist.json` 管理自选基金列表
 - 关键失败路径会输出 warning，方便知道当前用了真实数据还是回退数据
+- 每次生成报告后，会追加一条记录到 `reports/index.jsonl`
+- 报告会读取上一条索引记录，生成一段轻量历史对比
+- 每次生成报告后，会把实际用于分析的基金数据追加到 `data/fund_snapshots.jsonl`
+- 规则报告和 DeepSeek 报告都按统一日报结构输出
 
 ## GitHub 展示重点
 
@@ -151,6 +161,8 @@ DEEPSEEK_API_KEY=your_deepseek_api_key_here
 
 如果安装了 `akshare`，可以加上 `--use-real-data` 参数尝试获取真实基金数据。当前版本只在你传入基金代码时尝试获取真实数据；如果接口不可用、依赖未安装或基金代码无效，程序会自动回退到本地示例数据。
 
+真实数据模式会基于 AkShare 的历史净值计算增强字段，包括 `seven_day_return_percent`、`thirty_day_return_percent`、`max_daily_change_7d`、`trend_7d` 和 `drawdown_30d`。这些字段会进入风险判断、报告模板和 DeepSeek prompt。
+
 如果不想每次手动输入基金代码，可以维护 `watchlist.json`：
 
 ```json
@@ -162,5 +174,13 @@ DEEPSEEK_API_KEY=your_deepseek_api_key_here
 使用 `--use-watchlist` 时，程序会从这个文件读取基金代码。优先级是：`--codes` 命令行参数优先，其次是 `--use-watchlist`，两者都没有时使用全部示例数据。
 
 运行时如果真实数据、watchlist 或 DeepSeek 调用失败，程序会打印 `warning:` 提示，并尽量回退到可用的本地规则报告。
+
+每次报告生成后，程序会在 `reports/index.jsonl` 里记录一次运行信息，包括报告日期、报告路径、数据来源、分析模式、基金代码和 warning。这个文件后续可以用于做历史报告列表、对比分析或定时任务检查。
+
+当前历史对比基于上一条 `reports/index.jsonl` 记录，比较数据来源、分析模式、基金代码和 warning 数量。它不是基金净值级别的精确历史收益对比，而是先帮助你跟踪每次日报任务的运行变化。
+
+基金数据历史快照记录在 `data/fund_snapshots.jsonl`。每次生成报告时，程序会保存每只基金的代码、名称、净值、净值日期、日涨跌、风险等级和变化摘要。下一次再生成报告时，程序会读取同一基金上一条快照，并在报告中加入净值变化和风险等级变化。
+
+报告模板由 `src/report_template.py` 管理。规则模式会直接使用这个模板，DeepSeek 模式会在 prompt 中收到同样的结构要求，保证两种分析模式的输出风格尽量一致。
 
 后续遇到数据源选择、提示词设计、代码拆分、报告模板和迭代顺序等问题，可以继续在这个仓库里逐步完善。

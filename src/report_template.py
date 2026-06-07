@@ -81,6 +81,11 @@ def build_single_fund_section(fund: dict[str, object], report_date: date) -> lis
     theme = str(fund["theme"])
     nav_date = str(fund.get("nav_date", report_date.isoformat()))
     risk_level = str(fund.get("risk_level", "unknown"))
+    seven_day_return = format_optional_percent(fund.get("seven_day_return_percent"))
+    thirty_day_return = format_optional_percent(fund.get("thirty_day_return_percent"))
+    max_daily_change_7d = format_optional_percent(fund.get("max_daily_change_7d"))
+    trend_7d = str(fund.get("trend_7d", "unknown"))
+    drawdown_30d = format_optional_percent(fund.get("drawdown_30d"))
     change_summary = str(fund.get("change_summary", "No change summary available."))
     snapshot_summary = get_snapshot_summary(fund)
     direction = "rose" if change >= 0 else "fell"
@@ -94,6 +99,11 @@ def build_single_fund_section(fund: dict[str, object], report_date: date) -> lis
         f"| Latest NAV | {nav} |",
         f"| NAV Date | {nav_date} |",
         f"| Daily Change | {change:.2f}% |",
+        f"| 7D Return | {seven_day_return} |",
+        f"| 30D Return | {thirty_day_return} |",
+        f"| Max Daily Change 7D | {max_daily_change_7d} |",
+        f"| Trend 7D | {trend_7d} |",
+        f"| Drawdown 30D | {drawdown_30d} |",
         f"| Risk Level | {risk_level} |",
         "",
         f"- Change Summary: {change_summary}",
@@ -111,6 +121,15 @@ def get_snapshot_summary(fund: dict[str, object]) -> str:
     if isinstance(snapshot_comparison, dict):
         return str(snapshot_comparison.get("summary", "No snapshot comparison available."))
     return "No snapshot comparison available."
+
+
+def format_optional_percent(value: object) -> str:
+    if value is None:
+        return "unknown"
+    try:
+        return f"{float(str(value)):.2f}%"
+    except (TypeError, ValueError):
+        return "unknown"
 
 
 def build_footer_section() -> list[str]:
@@ -148,6 +167,11 @@ Use this markdown structure exactly:
 | Latest NAV | <nav> |
 | NAV Date | <nav date> |
 | Daily Change | <daily change> |
+| 7D Return | <seven day return> |
+| 30D Return | <thirty day return> |
+| Max Daily Change 7D | <max daily change in 7 days> |
+| Trend 7D | <up/down/mixed> |
+| Drawdown 30D | <30 day drawdown> |
 | Risk Level | <risk level> |
 
 - Change Summary: <short explanation>
