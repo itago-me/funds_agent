@@ -3,8 +3,6 @@ from __future__ import annotations
 import argparse
 from datetime import date
 
-from dotenv import load_dotenv
-
 from src.data_loader import load_funds
 from src.fund_snapshot_store import (
     append_fund_snapshots,
@@ -20,6 +18,7 @@ from src.report_index import (
 from src.report_writer import write_report
 from src.risk_analyzer import enrich_funds_with_risk
 from src.simple_analyzer import build_report
+from src.task_logger import finish_task_failed, finish_task_success, start_task
 from src.watchlist_loader import load_watchlist_codes
 
 
@@ -56,7 +55,9 @@ def resolve_fund_codes(args: argparse.Namespace) -> list[str] | None:
     return None
 
 
-def main() -> None:
+def run_daily_report() -> dict[str, object]:
+    from dotenv import load_dotenv
+
     load_dotenv()
     args = parse_args()
     report_date = date.today()
@@ -148,6 +149,31 @@ def main() -> None:
     print("今日基金分析报道:")
     print(report)
     print(f"Report created: {report_path}")
+    return {
+        "data_source": data_source,
+        "analysis_mode": analysis_mode,
+        "fund_codes": selected_codes,
+        "report_path": report_path,
+        "warnings": warnings,
+    }
+
+
+def main() -> None:
+    task = start_task()
+    try:
+        result = run_daily_report()
+    except Exception as exc:
+        finish_task_failed(task=task, error=exc)
+        raise
+
+    finish_task_success(
+        task=task,
+        data_source=str(result["data_source"]),
+        analysis_mode=str(result["analysis_mode"]),
+        fund_codes=result["fund_codes"] if isinstance(result["fund_codes"], list) else None,
+        report_path=result["report_path"],
+        warnings=result["warnings"] if isinstance(result["warnings"], list) else [],
+    )
 
 
 if __name__ == "__main__":

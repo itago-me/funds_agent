@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from datetime import date
-from openai import OpenAI
 
 from src.report_template import build_llm_template_instruction
 
@@ -16,6 +15,7 @@ def build_llm_report(
     report_date: date,
     history_comparison: dict[str, object] | None = None,
 ) -> str:
+    from openai import OpenAI
 
     client = OpenAI(
         api_key=os.getenv("DEEPSEEK_API_KEY"),
