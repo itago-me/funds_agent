@@ -21,6 +21,7 @@
 - [技术架构设计](docs/architecture.md)
 - [合规与免责声明](docs/compliance-and-disclaimer.md)
 - [产品概览](docs/product-overview.md)
+- [定时任务配置](docs/scheduling.md)
 
 当前已经进入第二阶段的最小拆分版本，保留简单结构，但不再把所有逻辑都写在一个文件里。
 
@@ -40,6 +41,7 @@
 - 基金数据历史快照
 - 统一报告模板
 - 每日任务日志
+- Cron 定时任务模板
 
 ## 核心能力规划
 
@@ -112,6 +114,7 @@ funds_agent/
 - 每次生成报告后，会把实际用于分析的基金数据追加到 `data/fund_snapshots.jsonl`
 - 规则报告和 DeepSeek 报告都按统一日报结构输出
 - 每次运行任务后，会追加一条任务日志到 `logs/task_runs.jsonl`
+- 可以参考 `scripts/cron.example` 和 `docs/scheduling.md` 配置每日自动运行
 
 ## GitHub 展示重点
 
@@ -186,5 +189,7 @@ DEEPSEEK_API_KEY=your_deepseek_api_key_here
 报告模板由 `src/report_template.py` 管理。规则模式会直接使用这个模板，DeepSeek 模式会在 prompt 中收到同样的结构要求，保证两种分析模式的输出风格尽量一致。
 
 每日任务日志记录在 `logs/task_runs.jsonl`。它关注任务本身是否运行成功，包括开始时间、结束时间、耗时、状态、数据来源、分析模式、基金代码、报告路径和 warning 数量。这个文件适合后续配合 cron 或其他定时任务排查问题。
+
+定时任务配置说明见 `docs/scheduling.md`，cron 模板见 `scripts/cron.example`。建议先手动运行 `./scripts/run_daily_report.sh`，确认成功后再写入 `crontab -e`。
 
 后续遇到数据源选择、提示词设计、代码拆分、报告模板和迭代顺序等问题，可以继续在这个仓库里逐步完善。

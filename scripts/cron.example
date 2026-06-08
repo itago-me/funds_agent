@@ -1,0 +1,6 @@
+# Run Funds Agent every weekday at 09:00.
+# Copy the line below into `crontab -e` after confirming the project path.
+0 9 * * 1-5 /home/ago/items/funds_agent/scripts/run_daily_report.sh >> /home/ago/items/funds_agent/logs/cron.log 2>&1
+
+# Alternative: run every day at 09:00.
+# 0 9 * * * /home/ago/items/funds_agent/scripts/run_daily_report.sh >> /home/ago/items/funds_agent/logs/cron.log 2>&1
