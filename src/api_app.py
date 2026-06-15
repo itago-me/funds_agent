@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 
 from src.jsonl_reader import read_jsonl
 from src.watchlist_loader import WATCHLIST_PATH, load_watchlist_codes
@@ -12,6 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 REPORT_INDEX_PATH = BASE_DIR / "reports" / "index.jsonl"
 TASK_LOG_PATH = BASE_DIR / "logs" / "task_runs.jsonl"
 SNAPSHOT_PATH = BASE_DIR / "data" / "fund_snapshots.jsonl"
+WEB_DIR = BASE_DIR / "web"
 
 app = FastAPI(
     title="Funds Agent API",
@@ -85,3 +87,7 @@ def list_fund_snapshots(limit: int = 50) -> dict[str, object]:
         "count": len(records),
         "snapshots": records,
     }
+
+
+if WEB_DIR.exists():
+    app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

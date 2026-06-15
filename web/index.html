@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Funds Agent Dashboard</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="hero panel">
+        <div>
+          <p class="eyebrow">Funds Agent</p>
+          <h1>每日基金智能分析看板</h1>
+          <p class="hero-copy">
+            从本地报告、任务日志、自选基金和历史快照中读取数据，用一个轻量页面展示 Agent 的运行结果。
+          </p>
+        </div>
+        <div class="status-card">
+          <span id="api-status-dot" class="status-dot"></span>
+          <div>
+            <p class="muted">API 状态</p>
+            <strong id="api-status-text">检查中...</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="metric-grid">
+        <article class="metric-card">
+          <span>自选基金</span>
+          <strong id="watchlist-count">-</strong>
+        </article>
+        <article class="metric-card">
+          <span>最近任务</span>
+          <strong id="task-count">-</strong>
+        </article>
+        <article class="metric-card">
+          <span>历史快照</span>
+          <strong id="snapshot-count">-</strong>
+        </article>
+        <article class="metric-card">
+          <span>最新报告日期</span>
+          <strong id="latest-report-date">-</strong>
+        </article>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="panel report-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Latest Report</p>
+              <h2>最新基金报告</h2>
+            </div>
+            <button id="refresh-button" type="button">刷新数据</button>
+          </div>
+          <div id="report-meta" class="meta-line">正在加载最新报告...</div>
+          <div id="latest-report" class="markdown-body loading">加载中...</div>
+        </article>
+
+        <aside class="side-column">
+          <article class="panel">
+            <div class="section-heading compact">
+              <h2>自选基金</h2>
+            </div>
+            <div id="watchlist" class="chip-list loading">加载中...</div>
+          </article>
+
+          <article class="panel">
+            <div class="section-heading compact">
+              <h2>最近任务</h2>
+            </div>
+            <div id="task-runs" class="timeline loading">加载中...</div>
+          </article>
+
+          <article class="panel">
+            <div class="section-heading compact">
+              <h2>基金快照</h2>
+            </div>
+            <div id="fund-snapshots" class="snapshot-list loading">加载中...</div>
+          </article>
+        </aside>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
