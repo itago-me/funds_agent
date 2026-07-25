@@ -1,3 +1,5 @@
+"""在本模块中，主要针对最新生成的基金相关数据与前一个最新数据做比较，最终生成最终的比较关系，为应用主模块进行服务"""
+
 from __future__ import annotations
 
 import json
@@ -62,7 +64,9 @@ def build_history_comparison(
         changes.append(f"Current run has {len(current_warnings)} warning(s).")
 
     if not changes:
-        changes.append("No major runtime changes compared with the previous indexed report.")
+        changes.append(
+            "No major runtime changes compared with the previous indexed report."
+        )
 
     return {
         "has_previous_report": True,

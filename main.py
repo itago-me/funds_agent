@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import date
+from pathlib import Path
 
 from src.data_loader import load_funds
 from src.fund_snapshot_store import (
@@ -55,16 +56,23 @@ def resolve_fund_codes(args: argparse.Namespace) -> list[str] | None:
     return None
 
 
-def run_daily_report() -> dict[str, object]:
+def run_daily_report(
+    *,
+    codes: list[str] | None = None,
+    use_llm: bool = False,
+    use_real_data: bool = False,
+    use_watchlist: bool = False,
+) -> dict[str, object]:
     from dotenv import load_dotenv
 
     load_dotenv()
-    args = parse_args()
     report_date = date.today()
-    selected_codes = resolve_fund_codes(args)
+    selected_codes = codes
+    if selected_codes is None and use_watchlist:
+        selected_codes = load_watchlist_codes()
     funds, data_source, warnings = load_funds(
         selected_codes=selected_codes,
-        prefer_real_data=args.use_real_data,
+        prefer_real_data=use_real_data,
     )
     funds = enrich_funds_with_risk(funds)
     previous_snapshots = load_latest_snapshots_by_code()
@@ -75,7 +83,7 @@ def run_daily_report() -> dict[str, object]:
 
     analysis_mode = "rule"
     previous_record = load_latest_report_record()
-    if args.use_llm and is_llm_available():
+    if use_llm and is_llm_available():
         try:
             analysis_mode = "deepseek_llm"
             history_comparison = build_history_comparison(
@@ -108,7 +116,7 @@ def run_daily_report() -> dict[str, object]:
             )
             print("analysis mode: fallback rule mode (DeepSeek request failed)")
     else:
-        if args.use_llm:
+        if use_llm:
             analysis_mode = "rule_fallback"
             print("analysis mode: fallback rule mode (missing DEEPSEEK_API_KEY)")
         else:
@@ -150,18 +158,26 @@ def run_daily_report() -> dict[str, object]:
     print(report)
     print(f"Report created: {report_path}")
     return {
+        "report_date": report_date.isoformat(),
         "data_source": data_source,
         "analysis_mode": analysis_mode,
         "fund_codes": selected_codes,
-        "report_path": report_path,
+        "report_path": str(report_path),
         "warnings": warnings,
+        "report_content": report,
     }
 
 
 def main() -> None:
+    args = parse_args()
     task = start_task()
     try:
-        result = run_daily_report()
+        result = run_daily_report(
+            codes=resolve_fund_codes(args),
+            use_llm=args.use_llm,
+            use_real_data=args.use_real_data,
+            use_watchlist=args.use_watchlist,
+        )
     except Exception as exc:
         finish_task_failed(task=task, error=exc)
         raise
@@ -171,7 +187,7 @@ def main() -> None:
         data_source=str(result["data_source"]),
         analysis_mode=str(result["analysis_mode"]),
         fund_codes=result["fund_codes"] if isinstance(result["fund_codes"], list) else None,
-        report_path=result["report_path"],
+        report_path=Path(str(result["report_path"])),
         warnings=result["warnings"] if isinstance(result["warnings"], list) else [],
     )
 

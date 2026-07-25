@@ -115,7 +115,7 @@ funds_agent/
 - 每次生成报告后，会把实际用于分析的基金数据追加到 `data/fund_snapshots.jsonl`
 - 规则报告和 DeepSeek 报告都按统一日报结构输出
 - 每次运行任务后，会追加一条任务日志到 `logs/task_runs.jsonl`
-- 可以参考 `scripts/cron.example` 和 `docs/scheduling.md` 配置每日自动运行
+- 可以参考 `scripts/cron.example` 和 `docs/cron_use.md` 配置每日自动运行
 - 可以通过 FastAPI 查询报告、日志、快照和 watchlist
 
 ## GitHub 展示重点
