@@ -51,8 +51,22 @@
               <p class="eyebrow">Latest Report</p>
               <h2>最新基金报告</h2>
             </div>
-            <button id="refresh-button" type="button">刷新数据</button>
+            <div class="button-row">
+              <button id="run-watchlist-report-button" type="button">生成自选日报</button>
+              <button id="refresh-button" type="button">刷新数据</button>
+            </div>
           </div>
+          <div class="report-options" aria-label="日报生成选项">
+            <label class="option-toggle">
+              <input id="report-use-real-data" type="checkbox" checked />
+              <span>真实数据</span>
+            </label>
+            <label class="option-toggle">
+              <input id="report-use-llm" type="checkbox" />
+              <span>LLM 分析</span>
+            </label>
+          </div>
+          <div id="report-action-message" class="form-message"></div>
           <div id="report-meta" class="meta-line">正在加载最新报告...</div>
           <div id="latest-report" class="markdown-body loading">加载中...</div>
         </article>
@@ -62,7 +76,44 @@
             <div class="section-heading compact">
               <h2>自选基金</h2>
             </div>
+            <form id="watchlist-form" class="watchlist-form">
+              <label class="sr-only" for="watchlist-input">基金代码</label>
+              <input
+                id="watchlist-input"
+                name="fund_code"
+                type="text"
+                inputmode="numeric"
+                placeholder="输入基金代码"
+                autocomplete="off"
+              />
+              <button id="watchlist-add-button" type="submit">添加</button>
+            </form>
+            <div id="watchlist-message" class="form-message"></div>
             <div id="watchlist" class="chip-list loading">加载中...</div>
+          </article>
+
+          <article class="panel">
+            <div class="section-heading compact">
+              <h2>临时查询</h2>
+            </div>
+            <form id="fund-lookup-form" class="watchlist-form">
+              <label class="sr-only" for="fund-lookup-input">基金代码</label>
+              <input
+                id="fund-lookup-input"
+                name="fund_code"
+                type="text"
+                inputmode="numeric"
+                placeholder="查询基金代码"
+                autocomplete="off"
+              />
+              <button id="fund-lookup-button" type="submit">查询</button>
+            </form>
+            <label class="option-toggle inline-option">
+              <input id="fund-lookup-use-real-data" type="checkbox" checked />
+              <span>真实数据</span>
+            </label>
+            <div id="fund-lookup-message" class="form-message"></div>
+            <div id="fund-lookup-result" class="lookup-result empty">暂无查询结果。</div>
           </article>
 
           <article class="panel">

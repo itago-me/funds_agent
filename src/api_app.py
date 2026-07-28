@@ -10,9 +10,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from main import run_daily_report
+from src.fund_service import lookup_fund
 from src.jsonl_reader import read_jsonl
 from src.task_logger import finish_task_failed, finish_task_success, start_task
-from src.watchlist_loader import WATCHLIST_PATH, load_watchlist_codes
+from src.watchlist_loader import (
+    WATCHLIST_PATH,
+    add_watchlist_code,
+    load_watchlist_codes,
+    remove_watchlist_code,
+    save_watchlist_codes,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -39,6 +46,17 @@ class ReportRunRequest(BaseModel):
     )
 
 
+class WatchlistUpdateRequest(BaseModel):
+    fund_codes: list[str] = Field(
+        default_factory=list,
+        description="Fund codes to store in watchlist.json.",
+    )
+
+
+class WatchlistFundRequest(BaseModel):
+    fund_code: str = Field(description="Fund code to add to watchlist.json.")
+
+
 app = FastAPI(
     title="Funds Agent API",
     version="0.1.0",
@@ -51,11 +69,89 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/funds/{fund_code}")
+def get_fund(fund_code: str, use_real_data: bool = True) -> dict[str, object]:
+    try:
+        return lookup_fund(fund_code=fund_code, use_real_data=use_real_data)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+
 @app.get("/watchlist")
 def get_watchlist() -> dict[str, object]:
+    fund_codes = load_watchlist_codes()
     return {
         "path": str(WATCHLIST_PATH),
-        "fund_codes": load_watchlist_codes(),
+        "count": len(fund_codes),
+        "fund_codes": fund_codes,
+    }
+
+
+@app.put("/watchlist")
+def update_watchlist(request: WatchlistUpdateRequest) -> dict[str, object]:
+    fund_codes = save_watchlist_codes(request.fund_codes)
+    return {
+        "status": "success",
+        "message": "Watchlist updated.",
+        "path": str(WATCHLIST_PATH),
+        "count": len(fund_codes),
+        "fund_codes": fund_codes,
+    }
+
+
+@app.post("/watchlist/funds", status_code=status.HTTP_201_CREATED)
+def add_watchlist_fund(request: WatchlistFundRequest) -> dict[str, object]:
+    try:
+        fund_codes, added = add_watchlist_code(request.fund_code)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return {
+        "status": "success",
+        "message": (
+            "Fund added to watchlist." if added else "Fund already exists in watchlist."
+        ),
+        "added": added,
+        "path": str(WATCHLIST_PATH),
+        "count": len(fund_codes),
+        "fund_codes": fund_codes,
+    }
+
+
+@app.delete("/watchlist/funds/{fund_code}")
+def delete_watchlist_fund(fund_code: str) -> dict[str, object]:
+    try:
+        fund_codes, removed = remove_watchlist_code(fund_code)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    if not removed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Fund code not found in watchlist: {fund_code}",
+        )
+
+    return {
+        "status": "success",
+        "message": "Fund removed from watchlist.",
+        "removed": removed,
+        "path": str(WATCHLIST_PATH),
+        "count": len(fund_codes),
+        "fund_codes": fund_codes,
     }
 
 
@@ -87,6 +183,12 @@ def get_latest_report() -> dict[str, object]:
 
 @app.post("/reports/run", status_code=status.HTTP_201_CREATED)
 def run_report(request: ReportRunRequest) -> dict[str, object]:
+    if request.codes is None and request.use_watchlist and not load_watchlist_codes():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Watchlist is empty. Add at least one fund code before running a watchlist report.",
+        )
+
     if not REPORT_RUN_LOCK.acquire(blocking=False):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
