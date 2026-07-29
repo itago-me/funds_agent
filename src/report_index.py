@@ -11,22 +11,113 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 REPORT_INDEX_PATH = BASE_DIR / "reports" / "index.jsonl"
 
 
-def load_latest_report_record() -> dict[str, object] | None:
+def load_report_records() -> list[dict[str, object]]:
     if not REPORT_INDEX_PATH.exists():
-        return None
+        return []
 
-    lines = [
-        line.strip()
-        for line in REPORT_INDEX_PATH.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    if not lines:
-        return None
+    records: list[dict[str, object]] = []
+    for line_number, line in enumerate(
+        REPORT_INDEX_PATH.read_text(encoding="utf-8").splitlines(),
+        start=1,
+    ):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
 
-    try:
-        return json.loads(lines[-1])
-    except json.JSONDecodeError:
+        if isinstance(record, dict):
+            records.append({"report_id": line_number, **record})
+    return records
+
+
+def load_report_summaries(limit: int = 20) -> dict[str, object]:
+    normalized_limit = max(1, min(limit, 100))
+    records = load_report_records()
+    summaries = [build_report_summary(record) for record in reversed(records)]
+    selected_summaries = summaries[:normalized_limit]
+
+    return {
+        "count": len(selected_summaries),
+        "total": len(summaries),
+        "limit": normalized_limit,
+        "reports": selected_summaries,
+    }
+
+
+def load_report_detail(report_id: int) -> dict[str, object] | None:
+    record = load_report_record_by_id(report_id=report_id)
+    if record is None:
         return None
+    return build_report_detail(record)
+
+
+def load_latest_report_detail() -> dict[str, object] | None:
+    record = load_latest_report_record()
+    if record is None:
+        return None
+    return build_report_detail(record)
+
+
+def load_report_record_by_id(report_id: int) -> dict[str, object] | None:
+    for record in load_report_records():
+        if record.get("report_id") == report_id:
+            return record
+    return None
+
+
+def build_report_summary(record: dict[str, object]) -> dict[str, object]:
+    fund_codes = normalize_list(record.get("fund_codes"))
+    warnings = normalize_list(record.get("warnings"))
+    report_path = Path(str(record.get("report_path", "")))
+
+    return {
+        "report_id": record.get("report_id"),
+        "created_at": record.get("created_at"),
+        "report_date": record.get("report_date"),
+        "data_source": record.get("data_source"),
+        "analysis_mode": record.get("analysis_mode"),
+        "fund_codes": fund_codes,
+        "fund_count": len(fund_codes),
+        "warnings_count": len(warnings),
+        "warnings": warnings,
+        "report_path": str(report_path),
+        "report_file_name": report_path.name,
+        "report_exists": report_path.exists(),
+    }
+
+
+def build_report_detail(record: dict[str, object]) -> dict[str, object]:
+    metadata = build_report_summary(record)
+    history_comparison = record.get("history_comparison")
+    if not isinstance(history_comparison, dict):
+        history_comparison = {}
+
+    report_path = Path(str(record.get("report_path", "")))
+    if not report_path.exists():
+        raise FileNotFoundError(str(report_path))
+
+    return {
+        "metadata": {
+            **metadata,
+            "history_comparison": history_comparison,
+        },
+        "content": report_path.read_text(encoding="utf-8"),
+    }
+
+
+def normalize_list(value: object) -> list[object]:
+    if isinstance(value, list):
+        return value
+    return []
+
+
+def load_latest_report_record() -> dict[str, object] | None:
+    records = load_report_records()
+    if not records:
+        return None
+    return records[-1]
 
 
 def build_history_comparison(

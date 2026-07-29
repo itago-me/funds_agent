@@ -12,6 +12,11 @@ from pydantic import BaseModel, Field
 from main import run_daily_report
 from src.fund_service import lookup_fund
 from src.jsonl_reader import read_jsonl
+from src.report_index import (
+    load_latest_report_detail,
+    load_report_detail,
+    load_report_summaries,
+)
 from src.task_logger import finish_task_failed, finish_task_success, start_task
 from src.watchlist_loader import (
     WATCHLIST_PATH,
@@ -157,28 +162,42 @@ def delete_watchlist_fund(fund_code: str) -> dict[str, object]:
 
 @app.get("/reports")
 def list_reports(limit: int = 20) -> dict[str, object]:
-    records = read_jsonl(REPORT_INDEX_PATH, limit=limit)
-    return {
-        "count": len(records),
-        "reports": records,
-    }
+    return load_report_summaries(limit=limit)
 
 
 @app.get("/reports/latest")
 def get_latest_report() -> dict[str, object]:
-    records = read_jsonl(REPORT_INDEX_PATH, limit=1)
-    if not records:
+    try:
+        detail = load_latest_report_detail()
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Latest report file not found: {exc}",
+        ) from exc
+
+    if detail is None:
         raise HTTPException(status_code=404, detail="No report index records found")
 
-    record = records[-1]
-    report_path = Path(str(record.get("report_path", "")))
-    if not report_path.exists():
-        raise HTTPException(status_code=404, detail="Latest report file not found")
+    return detail
 
-    return {
-        "metadata": record,
-        "content": report_path.read_text(encoding="utf-8"),
-    }
+
+@app.get("/reports/{report_id}")
+def get_report_detail(report_id: int) -> dict[str, object]:
+    try:
+        detail = load_report_detail(report_id=report_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Report file not found: {exc}",
+        ) from exc
+
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Report index record not found: {report_id}",
+        )
+
+    return detail
 
 
 @app.post("/reports/run", status_code=status.HTTP_201_CREATED)

@@ -6,6 +6,8 @@ const api = {
   addWatchlistFund: "/watchlist/funds",
   deleteWatchlistFund: (fundCode) => `/watchlist/funds/${encodeURIComponent(fundCode)}`,
   runReport: "/reports/run",
+  reports: "/reports?limit=8",
+  reportDetail: (reportId) => `/reports/${encodeURIComponent(reportId)}`,
   latestReport: "/reports/latest",
   taskRuns: "/task-runs?limit=8",
   snapshots: "/fund-snapshots?limit=8",
@@ -19,6 +21,7 @@ const elements = {
   snapshotCount: document.querySelector("#snapshot-count"),
   latestReportDate: document.querySelector("#latest-report-date"),
   reportMeta: document.querySelector("#report-meta"),
+  reportDetailMeta: document.querySelector("#report-detail-meta"),
   latestReport: document.querySelector("#latest-report"),
   watchlist: document.querySelector("#watchlist"),
   watchlistForm: document.querySelector("#watchlist-form"),
@@ -31,6 +34,7 @@ const elements = {
   fundLookupUseRealData: document.querySelector("#fund-lookup-use-real-data"),
   fundLookupMessage: document.querySelector("#fund-lookup-message"),
   fundLookupResult: document.querySelector("#fund-lookup-result"),
+  reportHistory: document.querySelector("#report-history"),
   taskRuns: document.querySelector("#task-runs"),
   snapshots: document.querySelector("#fund-snapshots"),
   runWatchlistReportButton: document.querySelector("#run-watchlist-report-button"),
@@ -41,6 +45,7 @@ const elements = {
 };
 
 let latestLookupFund = null;
+let selectedReportId = null;
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
@@ -218,16 +223,85 @@ function renderFundLookupResult(data) {
   `;
 }
 
+function renderReportMetadata(metadata) {
+  const fundCodes = metadata.fund_codes ?? [];
+  const warnings = metadata.warnings ?? [];
+  const historyComparison = metadata.history_comparison ?? {};
+  elements.reportDetailMeta.classList.remove("loading");
+  elements.reportDetailMeta.innerHTML = `
+    <div class="report-meta-grid">
+      <div><span>报告 ID</span><strong>#${escapeHtml(metadata.report_id ?? "-")}</strong></div>
+      <div><span>报告日期</span><strong>${escapeHtml(metadata.report_date ?? "-")}</strong></div>
+      <div><span>生成时间</span><strong>${escapeHtml(formatDateTime(metadata.created_at))}</strong></div>
+      <div><span>数据源</span><strong>${escapeHtml(metadata.data_source ?? "-")}</strong></div>
+      <div><span>分析模式</span><strong>${escapeHtml(metadata.analysis_mode ?? "-")}</strong></div>
+      <div><span>基金数量</span><strong>${escapeHtml(metadata.fund_count ?? fundCodes.length)}</strong></div>
+      <div><span>Warning</span><strong>${escapeHtml(metadata.warnings_count ?? warnings.length)}</strong></div>
+      <div><span>报告文件</span><strong>${escapeHtml(metadata.report_file_name ?? "-")}</strong></div>
+    </div>
+    <div class="report-meta-section">
+      <span>基金代码</span>
+      <p>${escapeHtml(fundCodes.join(", ") || "-")}</p>
+    </div>
+    <div class="report-meta-section">
+      <span>历史对比</span>
+      <p>${escapeHtml(historyComparison.summary ?? "暂无历史对比。")}</p>
+    </div>
+    <div class="report-meta-section">
+      <span>Warning 内容</span>
+      ${
+        warnings.length > 0
+          ? `<ul>${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>`
+          : "<p>无 warning。</p>"
+      }
+    </div>
+  `;
+}
+
 function renderLatestReport(data) {
   const metadata = data.metadata ?? {};
+  selectedReportId = metadata.report_id ?? null;
   elements.latestReportDate.textContent = metadata.report_date ?? "-";
   elements.reportMeta.textContent = [
+    `报告：${metadata.report_id ?? "最新"}`,
     `数据源：${metadata.data_source ?? "-"}`,
     `分析模式：${metadata.analysis_mode ?? "-"}`,
     `基金：${(metadata.fund_codes ?? []).join(", ") || "-"}`,
   ].join(" / ");
+  renderReportMetadata(metadata);
   elements.latestReport.classList.remove("loading");
   elements.latestReport.innerHTML = renderMarkdown(data.content ?? "暂无报告内容。");
+}
+
+function renderReportHistory(data) {
+  const reports = data.reports ?? [];
+  elements.reportHistory.classList.remove("loading");
+
+  if (reports.length === 0) {
+    elements.reportHistory.innerHTML = '<p class="empty">暂无历史报告。</p>';
+    return;
+  }
+
+  elements.reportHistory.innerHTML = reports
+    .map((item) => {
+      const isSelected = String(item.report_id) === String(selectedReportId);
+      const warnings = item.warnings_count ? ` / warning：${item.warnings_count}` : "";
+      const fundCodes = (item.fund_codes ?? []).join(", ") || "-";
+      return `
+        <button
+          class="report-history-item ${isSelected ? "selected" : ""}"
+          type="button"
+          data-report-id="${escapeHtml(item.report_id)}"
+        >
+          <span class="item-title">${escapeHtml(item.report_date ?? "-")} · #${escapeHtml(item.report_id ?? "-")}</span>
+          <span class="item-meta">
+            ${escapeHtml(item.data_source ?? "-")} / ${escapeHtml(item.analysis_mode ?? "-")} / ${escapeHtml(item.fund_count ?? 0)} 只基金${escapeHtml(warnings)}
+          </span>
+          <span class="item-meta">${escapeHtml(fundCodes)}</span>
+        </button>
+      `;
+    })
+    .join("");
 }
 
 function renderTaskRuns(data) {
@@ -310,6 +384,7 @@ async function loadDashboard() {
   const tasks = [
     fetchJson(api.watchlist).then(renderWatchlist).catch((error) => renderError(elements.watchlist, error.message)),
     fetchJson(api.latestReport).then(renderLatestReport).catch((error) => renderError(elements.latestReport, error.message)),
+    fetchJson(api.reports).then(renderReportHistory).catch((error) => renderError(elements.reportHistory, error.message)),
     fetchJson(api.taskRuns).then(renderTaskRuns).catch((error) => renderError(elements.taskRuns, error.message)),
     fetchJson(api.snapshots).then(renderSnapshots).catch((error) => renderError(elements.snapshots, error.message)),
   ];
@@ -335,6 +410,10 @@ async function deleteWatchlistFund(fundCode) {
 
 async function lookupFund(fundCode, useRealData) {
   return fetchJson(api.fund(fundCode, useRealData));
+}
+
+async function loadReportDetail(reportId) {
+  return fetchJson(api.reportDetail(reportId));
 }
 
 function getReportOptions() {
@@ -452,6 +531,36 @@ async function handleFundLookupResultClick(event) {
   }
 }
 
+async function handleReportHistoryClick(event) {
+  if (!(event.target instanceof Element)) {
+    return;
+  }
+
+  const reportButton = event.target.closest("[data-report-id]");
+  if (!reportButton) {
+    return;
+  }
+
+  const reportId = reportButton.dataset.reportId;
+  if (!reportId) {
+    return;
+  }
+
+  reportButton.disabled = true;
+  setReportActionMessage(`正在打开历史报告 #${reportId}...`);
+  try {
+    const data = await loadReportDetail(reportId);
+    renderLatestReport(data);
+    const reports = await fetchJson(api.reports);
+    renderReportHistory(reports);
+    setReportActionMessage(`已打开历史报告 #${reportId}。`, "success");
+  } catch (error) {
+    setReportActionMessage(error.message, "error");
+  } finally {
+    reportButton.disabled = false;
+  }
+}
+
 async function handleWatchlistSubmit(event) {
   event.preventDefault();
   const fundCode = elements.watchlistInput.value.trim();
@@ -531,4 +640,5 @@ elements.watchlistForm.addEventListener("submit", handleWatchlistSubmit);
 elements.watchlist.addEventListener("click", handleWatchlistClick);
 elements.fundLookupForm.addEventListener("submit", handleFundLookupSubmit);
 elements.fundLookupResult.addEventListener("click", handleFundLookupResultClick);
+elements.reportHistory.addEventListener("click", handleReportHistoryClick);
 loadDashboard();
