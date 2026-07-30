@@ -170,10 +170,18 @@ def run_daily_report(
 
 def main() -> None:
     args = parse_args()
-    task = start_task()
+    selected_codes = resolve_fund_codes(args)
+    task = start_task(
+        run_options={
+            "codes": selected_codes,
+            "use_watchlist": args.use_watchlist,
+            "use_real_data": args.use_real_data,
+            "use_llm": args.use_llm,
+        }
+    )
     try:
         result = run_daily_report(
-            codes=resolve_fund_codes(args),
+            codes=selected_codes,
             use_llm=args.use_llm,
             use_real_data=args.use_real_data,
             use_watchlist=args.use_watchlist,

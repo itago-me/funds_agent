@@ -9,6 +9,49 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SNAPSHOT_PATH = BASE_DIR / "data" / "fund_snapshots.jsonl"
 
 
+def load_fund_snapshots(fund_code: object, limit: int = 20) -> dict[str, object]:
+    normalized_code = normalize_fund_code(fund_code)
+    normalized_limit = max(1, min(limit, 200))
+    snapshots = [
+        record
+        for record in load_snapshot_records()
+        if str(record.get("fund_code", "")) == normalized_code
+    ]
+    latest_first = list(reversed(snapshots))
+
+    return {
+        "fund_code": normalized_code,
+        "count": len(latest_first[:normalized_limit]),
+        "total": len(latest_first),
+        "limit": normalized_limit,
+        "snapshots": latest_first[:normalized_limit],
+    }
+
+
+def load_snapshot_records() -> list[dict[str, object]]:
+    if not SNAPSHOT_PATH.exists():
+        return []
+
+    records: list[dict[str, object]] = []
+    for line in SNAPSHOT_PATH.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
+def normalize_fund_code(fund_code: object) -> str:
+    normalized = str(fund_code).strip()
+    if not normalized:
+        raise ValueError("fund_code must not be empty")
+    return normalized
+
+
 def append_fund_snapshots(
     funds: list[dict[str, object]],
     report_date: str,

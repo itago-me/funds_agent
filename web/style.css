@@ -410,6 +410,22 @@ h2 {
   box-shadow: none;
 }
 
+.chip-action {
+  border: 1px solid rgba(49, 92, 138, 0.2);
+  border-radius: 999px;
+  padding: 0.18rem 0.42rem;
+  color: var(--blue);
+  font-size: 0.75rem;
+  line-height: 1.2;
+  background: rgba(49, 92, 138, 0.08);
+  box-shadow: none;
+}
+
+.chip-action:hover {
+  color: #fffaf0;
+  background: var(--blue);
+}
+
 .chip-remove:hover {
   color: #fffaf0;
   background: var(--red);
@@ -463,6 +479,128 @@ h2 {
   justify-content: flex-start;
 }
 
+.fund-detail {
+  color: var(--muted);
+}
+
+.fund-detail-card {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 0.85rem;
+  background: #fffdf8;
+}
+
+.snapshot-table {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.trend-summary {
+  display: grid;
+  gap: 0.35rem;
+  border: 1px solid rgba(49, 92, 138, 0.18);
+  border-radius: 14px;
+  padding: 0.75rem;
+  background: rgba(49, 92, 138, 0.06);
+}
+
+.trend-summary.risk-changed {
+  border-color: rgba(183, 121, 31, 0.32);
+  background: rgba(183, 121, 31, 0.08);
+}
+
+.trend-summary p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.86rem;
+  line-height: 1.65;
+}
+
+.trend-chart {
+  display: grid;
+  gap: 0.55rem;
+  border: 1px solid rgba(31, 122, 77, 0.2);
+  border-radius: 14px;
+  padding: 0.75rem;
+  background: rgba(31, 122, 77, 0.06);
+}
+
+.trend-chart.empty {
+  color: var(--muted);
+  background: rgba(29, 42, 36, 0.04);
+}
+
+.trend-chart.empty p {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.trend-chart-head,
+.trend-chart-scale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.trend-chart-head span {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.trend-chart-head strong {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.trend-chart svg {
+  display: block;
+  width: 100%;
+  height: 8rem;
+  overflow: visible;
+}
+
+.trend-chart line {
+  stroke: rgba(29, 42, 36, 0.12);
+  stroke-width: 1.2;
+}
+
+.trend-chart polyline {
+  fill: none;
+  stroke: #1f7a4d;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3.8;
+}
+
+.snapshot-row {
+  display: grid;
+  grid-template-columns: minmax(5.5rem, 1fr) minmax(4rem, 0.7fr) minmax(4.5rem, 0.8fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.45rem;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.snapshot-header {
+  border-top: 0;
+  border-radius: 12px;
+  padding: 0.45rem 0.55rem;
+  color: var(--ink);
+  font-weight: 800;
+  background: rgba(29, 42, 36, 0.05);
+}
+
+.snapshot-row strong {
+  color: var(--ink);
+}
+
 .report-history {
   display: grid;
   gap: 0.7rem;
@@ -498,6 +636,57 @@ h2 {
   border-radius: 18px;
   padding: 0.85rem;
   background: #fffdf8;
+}
+
+.task-actions {
+  justify-content: flex-start;
+  margin-top: 0.65rem;
+}
+
+.task-detail {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.75rem;
+}
+
+.task-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.task-detail-grid div,
+.task-detail-section {
+  border-radius: 12px;
+  padding: 0.65rem;
+  background: rgba(29, 42, 36, 0.04);
+}
+
+.task-detail-grid span,
+.task-detail-section span {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.task-detail-grid strong,
+.task-detail-section p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.84rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.task-detail-section ul {
+  margin: 0;
+  padding-left: 1rem;
+  color: var(--ink);
+  font-size: 0.84rem;
+  line-height: 1.55;
 }
 
 .row {
@@ -603,6 +792,25 @@ h2 {
 
   .report-meta-grid {
     grid-template-columns: 1fr;
+  }
+
+  .snapshot-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .task-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .trend-chart-head,
+  .trend-chart-scale {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .trend-chart svg {
+    height: 6.5rem;
   }
 
   h1 {

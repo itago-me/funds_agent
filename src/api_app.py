@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from threading import Lock
 from pathlib import Path
 
@@ -11,10 +12,13 @@ from pydantic import BaseModel, Field
 
 from main import run_daily_report
 from src.fund_service import lookup_fund
+from src.fund_snapshot_store import load_fund_snapshots
 from src.jsonl_reader import read_jsonl
 from src.report_index import (
+    build_report_summary,
     load_latest_report_detail,
     load_report_detail,
+    load_report_records,
     load_report_summaries,
 )
 from src.task_logger import finish_task_failed, finish_task_success, start_task
@@ -74,6 +78,109 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def build_report_run_options(request: ReportRunRequest) -> dict[str, object]:
+    return {
+        "codes": request.codes,
+        "use_watchlist": request.use_watchlist,
+        "use_real_data": request.use_real_data,
+        "use_llm": request.use_llm,
+    }
+
+
+def build_report_lookup_by_path() -> dict[str, dict[str, object]]:
+    lookup: dict[str, dict[str, object]] = {}
+    for record in load_report_records():
+        summary = build_report_summary(record)
+        report_path = str(summary.get("report_path") or "")
+        if not report_path:
+            continue
+        lookup[report_path] = {
+            "report_id": summary.get("report_id"),
+            "report_date": summary.get("report_date"),
+            "report_file_name": summary.get("report_file_name"),
+            "report_exists": summary.get("report_exists"),
+        }
+    return lookup
+
+
+def enrich_task_run_record(
+    task_id: int,
+    record: dict[str, object],
+    report_lookup: dict[str, dict[str, object]],
+) -> dict[str, object]:
+    task_run = {"task_id": task_id, **record}
+    report_path = str(task_run.get("report_path") or "")
+    if report_path in report_lookup:
+        task_run.update(report_lookup[report_path])
+    elif report_path:
+        task_run["report_file_name"] = Path(report_path).name
+        task_run["report_exists"] = Path(report_path).exists()
+    return task_run
+
+
+def load_task_run_records() -> list[dict[str, object]]:
+    report_lookup = build_report_lookup_by_path()
+    if not TASK_LOG_PATH.exists():
+        return []
+
+    task_runs: list[dict[str, object]] = []
+    for line_number, line in enumerate(
+        TASK_LOG_PATH.read_text(encoding="utf-8").splitlines(),
+        start=1,
+    ):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(record, dict):
+            task_runs.append(
+                enrich_task_run_record(
+                    task_id=line_number,
+                    record=record,
+                    report_lookup=report_lookup,
+                )
+            )
+    return task_runs
+
+
+def load_task_run_by_id(task_id: int) -> dict[str, object] | None:
+    if task_id < 1:
+        return None
+    for task_run in load_task_run_records():
+        if task_run.get("task_id") == task_id:
+            return task_run
+    return None
+
+
+def build_rerun_request_from_task(task_run: dict[str, object]) -> ReportRunRequest:
+    run_options = task_run.get("run_options")
+    if isinstance(run_options, dict):
+        return ReportRunRequest(
+            codes=run_options.get("codes") if isinstance(run_options.get("codes"), list) else None,
+            use_watchlist=bool(run_options.get("use_watchlist", True)),
+            use_real_data=bool(run_options.get("use_real_data", True)),
+            use_llm=bool(run_options.get("use_llm", False)),
+        )
+
+    fund_codes = task_run.get("fund_codes")
+    if isinstance(fund_codes, list) and fund_codes:
+        return ReportRunRequest(
+            codes=[str(code) for code in fund_codes],
+            use_watchlist=False,
+            use_real_data=task_run.get("data_source") != "sample_data",
+            use_llm=str(task_run.get("analysis_mode")) == "deepseek_llm",
+        )
+
+    return ReportRunRequest(
+        codes=None,
+        use_watchlist=True,
+        use_real_data=True,
+        use_llm=False,
+    )
+
+
 @app.get("/funds/{fund_code}")
 def get_fund(fund_code: str, use_real_data: bool = True) -> dict[str, object]:
     try:
@@ -86,6 +193,17 @@ def get_fund(fund_code: str, use_real_data: bool = True) -> dict[str, object]:
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+
+@app.get("/funds/{fund_code}/snapshots")
+def get_fund_snapshots(fund_code: str, limit: int = 20) -> dict[str, object]:
+    try:
+        return load_fund_snapshots(fund_code=fund_code, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
 
@@ -214,7 +332,7 @@ def run_report(request: ReportRunRequest) -> dict[str, object]:
             detail="A report generation task is already running.",
         )
 
-    task = start_task()
+    task = start_task(run_options=build_report_run_options(request))
     try:
         result = run_daily_report(
             codes=request.codes,
@@ -251,10 +369,48 @@ def run_report(request: ReportRunRequest) -> dict[str, object]:
 
 @app.get("/task-runs")
 def list_task_runs(limit: int = 20) -> dict[str, object]:
-    records = read_jsonl(TASK_LOG_PATH, limit=limit)
+    normalized_limit = max(1, min(limit, 100))
+    all_records = load_task_run_records()
+    records = list(reversed(all_records))[:normalized_limit]
     return {
         "count": len(records),
+        "total": len(all_records),
+        "limit": normalized_limit,
         "task_runs": records,
+    }
+
+
+@app.get("/task-runs/{task_id}")
+def get_task_run_detail(task_id: int) -> dict[str, object]:
+    task_run = load_task_run_by_id(task_id=task_id)
+    if task_run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task run record not found: {task_id}",
+        )
+    return {"task_run": task_run}
+
+
+@app.post("/task-runs/{task_id}/rerun", status_code=status.HTTP_201_CREATED)
+def rerun_task_run(task_id: int) -> dict[str, object]:
+    task_run = load_task_run_by_id(task_id=task_id)
+    if task_run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task run record not found: {task_id}",
+        )
+    if task_run.get("status") != "failed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only failed task runs can be rerun.",
+        )
+
+    request = build_rerun_request_from_task(task_run)
+    response = run_report(request)
+    return {
+        **response,
+        "rerun_of_task_id": task_id,
+        "rerun_request": build_report_run_options(request),
     }
 
 
