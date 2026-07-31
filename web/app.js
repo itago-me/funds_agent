@@ -11,6 +11,7 @@ const api = {
   reports: "/reports?limit=8",
   reportDetail: (reportId) => `/reports/${encodeURIComponent(reportId)}`,
   latestReport: "/reports/latest",
+  scheduleStatus: "/schedule/status",
   taskRuns: "/task-runs?limit=8",
   taskRunDetail: (taskId) => `/task-runs/${encodeURIComponent(taskId)}`,
   rerunTaskRun: (taskId) => `/task-runs/${encodeURIComponent(taskId)}/rerun`,
@@ -27,6 +28,7 @@ const elements = {
   reportMeta: document.querySelector("#report-meta"),
   reportDetailMeta: document.querySelector("#report-detail-meta"),
   latestReport: document.querySelector("#latest-report"),
+  scheduleStatus: document.querySelector("#schedule-status"),
   watchlist: document.querySelector("#watchlist"),
   watchlistForm: document.querySelector("#watchlist-form"),
   watchlistInput: document.querySelector("#watchlist-input"),
@@ -476,6 +478,51 @@ function renderReportHistory(data) {
     .join("");
 }
 
+function renderScheduleStatus(data) {
+  const status = data.status ?? "unknown";
+  const latestRun = data.latest_run ?? {};
+  const todayRun = data.today_latest_run ?? {};
+  const failureAlert = data.failure_alert ?? null;
+  const runSource = Object.keys(todayRun).length > 0 ? todayRun : latestRun;
+  const statusText =
+    status === "ok"
+      ? "今日任务正常"
+      : status === "failed"
+        ? "最近任务失败"
+        : status === "not_run_today"
+          ? "今日尚未运行"
+          : "状态未知";
+  const failureAlertHtml = failureAlert
+    ? `
+      <div class="failure-alert">
+        <strong>失败提醒：#${escapeHtml(failureAlert.task_id ?? "-")}</strong>
+        <p>${escapeHtml(failureAlert.error_type ?? "Error")}：${escapeHtml(failureAlert.message ?? "-")}</p>
+      </div>
+    `
+    : "";
+
+  elements.scheduleStatus.className = `schedule-status panel ${escapeHtml(status)}`;
+  elements.scheduleStatus.innerHTML = `
+    <div class="schedule-status-head">
+      <div>
+        <p class="eyebrow">Scheduled Run</p>
+        <h2>${escapeHtml(statusText)}</h2>
+      </div>
+      <span class="badge ${escapeHtml(status)}">${escapeHtml(status)}</span>
+    </div>
+    <div class="schedule-status-grid">
+      <div><span>调度方式</span><strong>${escapeHtml(data.scheduler ?? "-")}</strong></div>
+      <div><span>计划时间</span><strong>${escapeHtml(data.expected_schedule ?? "-")}</strong></div>
+      <div><span>今天日期</span><strong>${escapeHtml(data.today ?? "-")}</strong></div>
+      <div><span>今天是否运行</span><strong>${data.has_run_today ? "是" : "否"}</strong></div>
+      <div><span>最近运行</span><strong>${escapeHtml(formatDateTime(runSource.started_at))}</strong></div>
+      <div><span>最近结果</span><strong>${escapeHtml(runSource.status ?? "-")}</strong></div>
+    </div>
+    <p class="schedule-message">${escapeHtml(data.message ?? "暂无运行状态。")}</p>
+    ${failureAlertHtml}
+  `;
+}
+
 function renderTaskRuns(data) {
   const taskRuns = data.task_runs ?? [];
   elements.taskCount.textContent = taskRuns.length;
@@ -617,6 +664,7 @@ async function loadDashboard() {
   const tasks = [
     fetchJson(api.watchlist).then(renderWatchlist).catch((error) => renderError(elements.watchlist, error.message)),
     fetchJson(api.latestReport).then(renderLatestReport).catch((error) => renderError(elements.latestReport, error.message)),
+    fetchJson(api.scheduleStatus).then(renderScheduleStatus).catch((error) => renderError(elements.scheduleStatus, error.message)),
     fetchJson(api.reports).then(renderReportHistory).catch((error) => renderError(elements.reportHistory, error.message)),
     fetchJson(api.taskRuns).then(renderTaskRuns).catch((error) => renderError(elements.taskRuns, error.message)),
     fetchJson(api.snapshots).then(renderSnapshots).catch((error) => renderError(elements.snapshots, error.message)),

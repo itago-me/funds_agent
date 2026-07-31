@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from threading import Lock
 from pathlib import Path
 
@@ -152,6 +153,88 @@ def load_task_run_by_id(task_id: int) -> dict[str, object] | None:
         if task_run.get("task_id") == task_id:
             return task_run
     return None
+
+
+def get_task_run_date(task_run: dict[str, object]) -> str:
+    for field_name in ("started_at", "finished_at"):
+        value = task_run.get(field_name)
+        if value:
+            return str(value)[:10]
+    return ""
+
+
+def find_latest_task_run(
+    task_runs: list[dict[str, object]],
+    status_value: str,
+) -> dict[str, object] | None:
+    for task_run in reversed(task_runs):
+        if task_run.get("status") == status_value:
+            return task_run
+    return None
+
+
+def build_failure_alert(task_run: dict[str, object] | None) -> dict[str, object] | None:
+    if task_run is None:
+        return None
+    return {
+        "task_id": task_run.get("task_id"),
+        "error_type": task_run.get("error_type"),
+        "message": task_run.get("error") or "Task failed without an error message.",
+        "started_at": task_run.get("started_at"),
+        "finished_at": task_run.get("finished_at"),
+    }
+
+
+def build_schedule_status(today: str | None = None) -> dict[str, object]:
+    today_value = today or date.today().isoformat()
+    task_runs = load_task_run_records()
+    latest_run = task_runs[-1] if task_runs else None
+    latest_success = find_latest_task_run(task_runs, "success")
+    latest_failure = find_latest_task_run(task_runs, "failed")
+    today_runs = [
+        task_run for task_run in task_runs if get_task_run_date(task_run) == today_value
+    ]
+    today_latest_run = today_runs[-1] if today_runs else None
+    latest_failure_is_latest = (
+        latest_failure is not None
+        and latest_run is not None
+        and latest_failure.get("task_id") == latest_run.get("task_id")
+    )
+
+    if latest_failure_is_latest:
+        status_value = "failed"
+        message = "Latest scheduled report run failed."
+    elif not today_runs:
+        status_value = "not_run_today"
+        message = "No scheduled report run has been recorded today."
+    elif today_latest_run and today_latest_run.get("status") == "success":
+        status_value = "ok"
+        message = "Today's scheduled report run succeeded."
+    elif today_latest_run and today_latest_run.get("status") == "failed":
+        status_value = "failed"
+        message = "Today's scheduled report run failed."
+    else:
+        status_value = "unknown"
+        message = "Scheduled report status is unknown."
+
+    return {
+        "status": status_value,
+        "message": message,
+        "today": today_value,
+        "scheduler": "systemd_user_timer",
+        "timer_name": "funds-agent-daily-report.timer",
+        "service_name": "funds-agent-daily-report.service",
+        "expected_schedule": "Mon..Fri 09:00",
+        "has_run_today": bool(today_runs),
+        "latest_run": latest_run,
+        "today_latest_run": today_latest_run,
+        "latest_success": latest_success,
+        "latest_failure": latest_failure,
+        "latest_failure_is_latest": latest_failure_is_latest,
+        "failure_alert": build_failure_alert(latest_failure)
+        if latest_failure_is_latest
+        else None,
+    }
 
 
 def build_rerun_request_from_task(task_run: dict[str, object]) -> ReportRunRequest:
@@ -378,6 +461,11 @@ def list_task_runs(limit: int = 20) -> dict[str, object]:
         "limit": normalized_limit,
         "task_runs": records,
     }
+
+
+@app.get("/schedule/status")
+def get_schedule_status() -> dict[str, object]:
+    return build_schedule_status()
 
 
 @app.get("/task-runs/{task_id}")

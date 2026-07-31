@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Funds Agent daily report every weekday
+
+[Timer]
+OnCalendar=Mon..Fri 09:00
+Persistent=true
+Unit=funds-agent-daily-report.service
+
+[Install]
+WantedBy=timers.target

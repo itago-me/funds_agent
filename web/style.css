@@ -206,6 +206,89 @@ h2 {
   font-size: 1.8rem;
 }
 
+.schedule-status {
+  display: grid;
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.schedule-status.ok {
+  border-color: rgba(31, 122, 77, 0.28);
+  background: rgba(31, 122, 77, 0.06);
+}
+
+.schedule-status.failed {
+  border-color: rgba(176, 74, 69, 0.32);
+  background: rgba(176, 74, 69, 0.07);
+}
+
+.schedule-status.not_run_today {
+  border-color: rgba(183, 121, 31, 0.32);
+  background: rgba(183, 121, 31, 0.08);
+}
+
+.schedule-status-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.schedule-status-head h2 {
+  margin: 0;
+}
+
+.schedule-status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.schedule-status-grid div {
+  border-radius: 12px;
+  padding: 0.7rem;
+  background: rgba(255, 253, 248, 0.72);
+}
+
+.schedule-status-grid span {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.schedule-status-grid strong {
+  color: var(--ink);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.schedule-message {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.failure-alert {
+  border: 1px solid rgba(176, 74, 69, 0.28);
+  border-radius: 14px;
+  padding: 0.8rem;
+  background: rgba(176, 74, 69, 0.08);
+}
+
+.failure-alert strong {
+  color: var(--red);
+}
+
+.failure-alert p {
+  margin: 0.35rem 0 0;
+  color: var(--ink);
+  font-size: 0.86rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) minmax(330px, 0.8fr);
@@ -756,7 +839,8 @@ h2 {
   }
 
   .metric-grid,
-  .dashboard-grid {
+  .dashboard-grid,
+  .schedule-status-grid {
     grid-template-columns: 1fr;
   }
 
