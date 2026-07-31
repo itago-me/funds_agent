@@ -671,6 +671,7 @@ async function loadDashboard() {
   ];
 
   await Promise.allSettled(tasks);
+  await loadInitialReportFromUrl();
 }
 
 async function addWatchlistFund(fundCode) {
@@ -699,6 +700,24 @@ async function loadFundSnapshots(fundCode, limit = 10) {
 
 async function loadReportDetail(reportId) {
   return fetchJson(api.reportDetail(reportId));
+}
+
+async function loadInitialReportFromUrl() {
+  const reportId = new URLSearchParams(window.location.search).get("report_id");
+  if (!reportId) {
+    return;
+  }
+
+  setReportActionMessage(`正在打开通知中的报告 #${reportId}...`);
+  try {
+    const data = await loadReportDetail(reportId);
+    renderLatestReport(data);
+    const reports = await fetchJson(api.reports);
+    renderReportHistory(reports);
+    setReportActionMessage(`已打开通知中的报告 #${reportId}。`, "success");
+  } catch (error) {
+    setReportActionMessage(`无法打开报告 #${reportId}：${error.message}`, "error");
+  }
 }
 
 async function loadTaskRunDetail(taskId) {

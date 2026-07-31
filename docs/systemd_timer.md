@@ -18,7 +18,27 @@ The installer writes these user units:
 The timer runs every weekday at 09:00 and uses:
 
 ```bash
-scripts/run_daily_report.sh
+scripts/run_scheduled_report.sh
+```
+
+The scheduled wrapper runs the report first and then sends a desktop
+notification through `notify-send`. The report exit code remains authoritative:
+if notification delivery fails, the wrapper does not change the report result.
+
+The notification action opens a URL in this form:
+
+```text
+http://127.0.0.1:8001/?report_id=<report-id>
+```
+
+The dashboard reads `report_id` from the URL and loads the existing
+`GET /reports/{report_id}` endpoint.
+
+For a manual notification preview without displaying a desktop notification:
+
+```bash
+FUNDS_AGENT_NOTIFY_DRY_RUN=1 \
+  /home/ago/.conda/envs/fund/bin/python -m src.notification_service --latest
 ```
 
 ## Check Status

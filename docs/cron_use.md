@@ -1,6 +1,12 @@
-# Scheduling
+# Legacy Cron Scheduling
 
-This document explains how to run Funds Agent as a daily scheduled task.
+This document records the old cron-based scheduling option. The current recommended scheduler is the user-level systemd timer described in:
+
+```text
+docs/systemd_timer.md
+```
+
+Keep this file only as a reference for understanding or removing older cron setups.
 
 ## What The Scheduled Task Does
 
@@ -24,7 +30,7 @@ After each run, the project should produce or update:
 - `logs/task_runs.jsonl`
 - `logs/cron.log` if cron output redirection is configured
 
-## Recommended Cron Setup
+## Legacy Cron Setup
 
 Open your crontab:
 

@@ -5,5 +5,5 @@ Documentation=file:@PROJECT_DIR@/docs/systemd_timer.md
 [Service]
 Type=oneshot
 WorkingDirectory=@PROJECT_DIR@
-ExecStart=@PROJECT_DIR@/scripts/run_daily_report.sh
+ExecStart=@PROJECT_DIR@/scripts/run_scheduled_report.sh
 Environment=PYTHONUNBUFFERED=1

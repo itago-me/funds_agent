@@ -13,6 +13,7 @@ sed "s|@PROJECT_DIR@|${PROJECT_DIR}|g" "${SERVICE_TEMPLATE}" > "${SERVICE_TARGET
 cp "${TIMER_SOURCE}" "${TIMER_TARGET}"
 
 chmod +x "${PROJECT_DIR}/scripts/run_daily_report.sh"
+chmod +x "${PROJECT_DIR}/scripts/run_scheduled_report.sh"
 systemctl --user daemon-reload
 systemctl --user enable --now funds-agent-daily-report.timer
 
