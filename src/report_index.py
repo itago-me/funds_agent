@@ -1,10 +1,10 @@
-"""在本模块中，主要针对最新生成的基金相关数据与前一个最新数据做比较，最终生成最终的比较关系，为应用主模块进行服务"""
+"""Report metadata facade used by CLI and API code."""
 
 from __future__ import annotations
 
-import json
-from datetime import datetime
 from pathlib import Path
+
+from src.report_store import append_report_record, load_report_records as load_report_records_from_store
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -12,24 +12,7 @@ REPORT_INDEX_PATH = BASE_DIR / "reports" / "index.jsonl"
 
 
 def load_report_records() -> list[dict[str, object]]:
-    if not REPORT_INDEX_PATH.exists():
-        return []
-
-    records: list[dict[str, object]] = []
-    for line_number, line in enumerate(
-        REPORT_INDEX_PATH.read_text(encoding="utf-8").splitlines(),
-        start=1,
-    ):
-        if not line.strip():
-            continue
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        if isinstance(record, dict):
-            records.append({"report_id": line_number, **record})
-    return records
+    return load_report_records_from_store(report_index_path=REPORT_INDEX_PATH)
 
 
 def load_report_summaries(limit: int = 20) -> dict[str, object]:
@@ -176,17 +159,13 @@ def append_report_index(
     warnings: list[str],
     history_comparison: dict[str, object] | None = None,
 ) -> None:
-    REPORT_INDEX_PATH.parent.mkdir(exist_ok=True)
-    record = {
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-        "report_date": report_date,
-        "report_path": str(report_path),
-        "data_source": data_source,
-        "analysis_mode": analysis_mode,
-        "fund_codes": fund_codes or [],
-        "warnings": warnings,
-        "history_comparison": history_comparison or {},
-    }
-
-    with REPORT_INDEX_PATH.open("a", encoding="utf-8") as file:
-        file.write(json.dumps(record, ensure_ascii=False) + "\n")
+    append_report_record(
+        report_path=report_path,
+        report_date=report_date,
+        data_source=data_source,
+        analysis_mode=analysis_mode,
+        fund_codes=fund_codes,
+        warnings=warnings,
+        history_comparison=history_comparison,
+        report_index_path=REPORT_INDEX_PATH,
+    )
