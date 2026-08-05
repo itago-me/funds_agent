@@ -98,6 +98,7 @@ class FundSnapshot(Base):
         server_default=func.now(),
     )
     report_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    data_source: Mapped[str] = mapped_column(String(50), nullable=False)
     fund_code: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     fund_name: Mapped[str] = mapped_column(String(200), nullable=False)
     theme: Mapped[str | None] = mapped_column(String(100), nullable=True)
