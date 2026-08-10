@@ -115,7 +115,9 @@ funds_agent/
 - 每次生成报告后，会把实际用于分析的基金数据追加到 `data/fund_snapshots.jsonl`
 - 规则报告和 DeepSeek 报告都按统一日报结构输出
 - 每次运行任务后，会追加一条任务日志到 `logs/task_runs.jsonl`
-- 可以参考 `scripts/cron.example` 和 `docs/cron_use.md` 配置每日自动运行
+- 可以参考 `docs/systemd_timer.md` 配置用户级 systemd timer 每日自动运行
+- 定时任务完成后会通过 `notify-send` 提示成功或失败
+- 成功通知可以点击并打开对应的报告详情页
 - 可以通过 FastAPI 查询报告、日志、快照和 watchlist
 
 ## GitHub 展示重点
@@ -207,9 +209,9 @@ DEEPSEEK_API_KEY=your_deepseek_api_key_here
 
 报告模板由 `src/report_template.py` 管理。规则模式会直接使用这个模板，DeepSeek 模式会在 prompt 中收到同样的结构要求，保证两种分析模式的输出风格尽量一致。
 
-每日任务日志记录在 `logs/task_runs.jsonl`。它关注任务本身是否运行成功，包括开始时间、结束时间、耗时、状态、数据来源、分析模式、基金代码、报告路径和 warning 数量。这个文件适合后续配合 cron 或其他定时任务排查问题。
+每日任务日志记录在 `logs/task_runs.jsonl`。它关注任务本身是否运行成功，包括开始时间、结束时间、耗时、状态、数据来源、分析模式、基金代码、报告路径和 warning 数量。这个文件适合配合 systemd timer 排查每日任务是否正常执行。
 
-定时任务配置说明见 `docs/scheduling.md`，cron 模板见 `scripts/cron.example`。建议先手动运行 `./scripts/run_daily_report.sh`，确认成功后再写入 `crontab -e`。
+定时任务配置说明见 `docs/systemd_timer.md`。建议先手动运行 `./scripts/run_daily_report.sh`，确认成功后再执行 `./scripts/install_user_timer.sh`。
 
 轻量 API 定义在 `src/api_app.py`。当前 API 只读取本地数据文件，不触发新的日报任务，适合后续前端页面读取报告列表、最新报告、任务日志、基金快照和 watchlist。
 

@@ -10,53 +10,25 @@ import sys
 from pathlib import Path
 from urllib.parse import quote
 
+from src.report_store import load_report_records
+from src.task_run_store import load_task_run_records
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 TASK_LOG_PATH = BASE_DIR / "logs" / "task_runs.jsonl"
 REPORT_INDEX_PATH = BASE_DIR / "reports" / "index.jsonl"
-DASHBOARD_URL = os.getenv("FUNDS_AGENT_DASHBOARD_URL", "http://127.0.0.1:8001")
+DASHBOARD_URL = os.getenv("FUNDS_AGENT_DASHBOARD_URL", "http://127.0.0.1:8000")
 
 
 def _load_task_records() -> list[dict[str, object]]:
-    path = TASK_LOG_PATH
-    if not path.exists():
-        return []
-
-    records: list[dict[str, object]] = []
-    for line_number, line in enumerate(
-        path.read_text(encoding="utf-8").splitlines(),
-        start=1,
-    ):
-        if not line.strip():
-            continue
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(record, dict):
-            records.append({"task_id": line_number, **record})
-    return records
+    return load_task_run_records(
+        task_log_path=TASK_LOG_PATH,
+        report_index_path=REPORT_INDEX_PATH,
+    )
 
 
 def _load_report_records() -> list[dict[str, object]]:
-    """Match the existing report_index.py ID rule: one-based JSONL line number."""
-    if not REPORT_INDEX_PATH.exists():
-        return []
-
-    records: list[dict[str, object]] = []
-    for line_number, line in enumerate(
-        REPORT_INDEX_PATH.read_text(encoding="utf-8").splitlines(),
-        start=1,
-    ):
-        if not line.strip():
-            continue
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(record, dict):
-            records.append({"report_id": line_number, **record})
-    return records
+    return load_report_records(report_index_path=REPORT_INDEX_PATH)
 
 
 def _latest_record(records: list[dict[str, object]]) -> dict[str, object] | None:

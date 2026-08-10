@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import date
 from threading import Lock
 from pathlib import Path
@@ -13,8 +12,8 @@ from pydantic import BaseModel, Field
 
 from main import run_daily_report
 from src.fund_service import lookup_fund
-from src.fund_snapshot_store import load_fund_snapshots
-from src.jsonl_reader import read_jsonl
+from src.fund_snapshot_store import load_fund_snapshots, load_snapshot_records
+import src.report_index as report_index
 from src.report_index import (
     build_report_summary,
     load_latest_report_detail,
@@ -23,6 +22,7 @@ from src.report_index import (
     load_report_summaries,
 )
 from src.task_logger import finish_task_failed, finish_task_success, start_task
+from src.task_run_store import load_task_run_records as load_task_run_records_from_store
 from src.watchlist_loader import (
     WATCHLIST_PATH,
     add_watchlist_code,
@@ -88,62 +88,11 @@ def build_report_run_options(request: ReportRunRequest) -> dict[str, object]:
     }
 
 
-def build_report_lookup_by_path() -> dict[str, dict[str, object]]:
-    lookup: dict[str, dict[str, object]] = {}
-    for record in load_report_records():
-        summary = build_report_summary(record)
-        report_path = str(summary.get("report_path") or "")
-        if not report_path:
-            continue
-        lookup[report_path] = {
-            "report_id": summary.get("report_id"),
-            "report_date": summary.get("report_date"),
-            "report_file_name": summary.get("report_file_name"),
-            "report_exists": summary.get("report_exists"),
-        }
-    return lookup
-
-
-def enrich_task_run_record(
-    task_id: int,
-    record: dict[str, object],
-    report_lookup: dict[str, dict[str, object]],
-) -> dict[str, object]:
-    task_run = {"task_id": task_id, **record}
-    report_path = str(task_run.get("report_path") or "")
-    if report_path in report_lookup:
-        task_run.update(report_lookup[report_path])
-    elif report_path:
-        task_run["report_file_name"] = Path(report_path).name
-        task_run["report_exists"] = Path(report_path).exists()
-    return task_run
-
-
 def load_task_run_records() -> list[dict[str, object]]:
-    report_lookup = build_report_lookup_by_path()
-    if not TASK_LOG_PATH.exists():
-        return []
-
-    task_runs: list[dict[str, object]] = []
-    for line_number, line in enumerate(
-        TASK_LOG_PATH.read_text(encoding="utf-8").splitlines(),
-        start=1,
-    ):
-        if not line.strip():
-            continue
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(record, dict):
-            task_runs.append(
-                enrich_task_run_record(
-                    task_id=line_number,
-                    record=record,
-                    report_lookup=report_lookup,
-                )
-            )
-    return task_runs
+    return load_task_run_records_from_store(
+        task_log_path=TASK_LOG_PATH,
+        report_index_path=report_index.REPORT_INDEX_PATH,
+    )
 
 
 def load_task_run_by_id(task_id: int) -> dict[str, object] | None:
@@ -504,7 +453,7 @@ def rerun_task_run(task_id: int) -> dict[str, object]:
 
 @app.get("/fund-snapshots")
 def list_fund_snapshots(limit: int = 50) -> dict[str, object]:
-    records = read_jsonl(SNAPSHOT_PATH, limit=limit)
+    records = load_snapshot_records(limit=limit, snapshot_path=SNAPSHOT_PATH)
     return {
         "count": len(records),
         "snapshots": records,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Callable, Mapping
 from urllib.parse import quote_plus, urlsplit, urlunsplit
 
@@ -44,6 +45,7 @@ class DatabaseConfig:
 def load_database_config(
     environ: Mapping[str, str] | None = None,
 ) -> DatabaseConfig:
+    _load_project_env()
     env = environ or os.environ
     database_url = env.get("DATABASE_URL")
     if database_url:
@@ -57,6 +59,21 @@ def load_database_config(
         password=env.get("MYSQL_PASSWORD", ""),
         charset=env.get("MYSQL_CHARSET", DEFAULT_MYSQL_CHARSET),
     )
+
+
+@lru_cache(maxsize=1)
+def _load_project_env() -> None:
+    try:
+        from dotenv import load_dotenv
+    except ModuleNotFoundError:
+        return
+
+    cwd = Path.cwd().resolve()
+    for directory in (cwd, *cwd.parents):
+        env_path = directory / ".env"
+        if env_path.exists():
+            load_dotenv(dotenv_path=env_path, override=False)
+            break
 
 
 def build_database_url(config: DatabaseConfig | None = None) -> str:

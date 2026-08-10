@@ -71,10 +71,14 @@ def _load_records_from_jsonl(path: Path) -> list[dict[str, object]]:
 def _build_report_lookup(
     *,
     report_index_path: Path,
+    session_factory: SessionFactory | None = None,
 ) -> tuple[dict[int, dict[str, object]], dict[str, dict[str, object]]]:
     by_id: dict[int, dict[str, object]] = {}
     by_path: dict[str, dict[str, object]] = {}
-    for record in load_report_records(report_index_path=report_index_path):
+    for record in load_report_records(
+        session_factory=session_factory,
+        report_index_path=report_index_path,
+    ):
         report_id = record.get("report_id")
         if isinstance(report_id, int):
             summary = _build_report_link_summary(record)
@@ -209,7 +213,8 @@ def load_task_run_records(
     report_index_path: Path = REPORT_INDEX_PATH,
 ) -> list[dict[str, object]]:
     report_lookup_by_id, report_lookup_by_path = _build_report_lookup(
-        report_index_path=report_index_path
+        report_index_path=report_index_path,
+        session_factory=session_factory,
     )
     jsonl_records = _load_records_from_jsonl(task_log_path)
     factory = session_factory or _default_session_factory()
