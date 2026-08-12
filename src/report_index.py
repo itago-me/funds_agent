@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
+from typing import Any
 
-from src.report_store import append_report_record, load_report_records as load_report_records_from_store
+from src.report_store import (
+    append_report_record,
+    load_report_records as load_report_records_from_store,
+    query_report_records,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -15,17 +21,37 @@ def load_report_records() -> list[dict[str, object]]:
     return load_report_records_from_store(report_index_path=REPORT_INDEX_PATH)
 
 
-def load_report_summaries(limit: int = 20) -> dict[str, object]:
+def load_report_summaries(
+    limit: int = 20,
+    *,
+    offset: int = 0,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    data_source: str | None = None,
+    analysis_mode: str | None = None,
+    fund_code: str | None = None,
+    session_factory: Any | None = None,
+) -> dict[str, object]:
     normalized_limit = max(1, min(limit, 100))
-    records = load_report_records()
-    summaries = [build_report_summary(record) for record in reversed(records)]
-    selected_summaries = summaries[:normalized_limit]
+    normalized_offset = max(0, offset)
+    records, total = query_report_records(
+        start_date=start_date,
+        end_date=end_date,
+        data_source=data_source,
+        analysis_mode=analysis_mode,
+        fund_code=fund_code,
+        limit=normalized_limit,
+        offset=normalized_offset,
+        session_factory=session_factory,
+    )
+    summaries = [build_report_summary(record) for record in records]
 
     return {
-        "count": len(selected_summaries),
-        "total": len(summaries),
+        "count": len(summaries),
+        "total": total,
         "limit": normalized_limit,
-        "reports": selected_summaries,
+        "offset": normalized_offset,
+        "reports": summaries,
     }
 
 

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 from contextlib import AbstractContextManager
-from datetime import datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
 from typing import Callable
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from src.db import get_session_factory
 from src.models import Report, TaskRun
@@ -250,6 +250,64 @@ def load_task_run_records(
         ]
 
     return []
+
+
+def query_task_run_records(
+    *,
+    status_value: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    has_report: bool | None = None,
+    failed_only: bool = False,
+    limit: int = 20,
+    offset: int = 0,
+    session_factory: SessionFactory | None = None,
+    report_index_path: Path = REPORT_INDEX_PATH,
+) -> tuple[list[dict[str, object]], int]:
+    normalized_limit = max(1, min(limit, 100))
+    normalized_offset = max(0, offset)
+    normalized_status = status_value.strip() if status_value else None
+    report_lookup_by_id, report_lookup_by_path = _build_report_lookup(
+        report_index_path=report_index_path,
+        session_factory=session_factory,
+    )
+    factory = session_factory or _default_session_factory()
+
+    with factory() as session:
+        filters = []
+        if failed_only:
+            filters.append(TaskRun.status == "failed")
+        elif normalized_status:
+            filters.append(TaskRun.status == normalized_status)
+        if start_date is not None:
+            filters.append(TaskRun.started_at >= datetime.combine(start_date, time.min))
+        if end_date is not None:
+            filters.append(TaskRun.started_at <= datetime.combine(end_date, time.max))
+        if has_report is True:
+            filters.append(TaskRun.report_id.is_not(None))
+        elif has_report is False:
+            filters.append(TaskRun.report_id.is_(None))
+
+        total = session.execute(
+            select(func.count()).select_from(TaskRun).where(*filters)
+        ).scalar_one()
+        task_runs = session.execute(
+            select(TaskRun)
+            .where(*filters)
+            .order_by(TaskRun.started_at.desc(), TaskRun.id.desc())
+            .limit(normalized_limit)
+            .offset(normalized_offset)
+        ).scalars().all()
+
+    records = [
+        _enrich_report_link(
+            _record_from_model(task_run),
+            report_lookup_by_id=report_lookup_by_id,
+            report_lookup_by_path=report_lookup_by_path,
+        )
+        for task_run in task_runs
+    ]
+    return records, int(total)
 
 
 def append_task_run_record(

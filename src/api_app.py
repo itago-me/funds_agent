@@ -5,14 +5,21 @@ from __future__ import annotations
 from datetime import date
 from threading import Lock
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import SQLAlchemyError
 
 from main import run_daily_report
 from src.fund_service import lookup_fund
-from src.fund_snapshot_store import load_fund_snapshots, load_snapshot_records
+from src.fund_snapshot_store import (
+    load_fund_snapshot_trend,
+    load_fund_snapshots,
+    load_snapshot_records,
+)
+from src.database_status import load_database_status
 import src.report_index as report_index
 from src.report_index import (
     build_report_summary,
@@ -22,7 +29,10 @@ from src.report_index import (
     load_report_summaries,
 )
 from src.task_logger import finish_task_failed, finish_task_success, start_task
-from src.task_run_store import load_task_run_records as load_task_run_records_from_store
+from src.task_run_store import (
+    load_task_run_records as load_task_run_records_from_store,
+    query_task_run_records,
+)
 from src.watchlist_loader import (
     WATCHLIST_PATH,
     add_watchlist_code,
@@ -77,6 +87,17 @@ app = FastAPI(
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/database/status")
+def get_database_status() -> dict[str, object]:
+    try:
+        return load_database_status()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is unavailable.",
+        ) from exc
 
 
 def build_report_run_options(request: ReportRunRequest) -> dict[str, object]:
@@ -240,6 +261,38 @@ def get_fund_snapshots(fund_code: str, limit: int = 20) -> dict[str, object]:
         ) from exc
 
 
+@app.get("/funds/{fund_code}/trend")
+def get_fund_snapshot_trend(
+    fund_code: str,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> dict[str, object]:
+    if start_date is not None and end_date is not None and start_date > end_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="start_date must be earlier than or equal to end_date.",
+        )
+
+    try:
+        return load_fund_snapshot_trend(
+            fund_code=fund_code,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is unavailable.",
+        ) from exc
+
+
 @app.get("/watchlist")
 def get_watchlist() -> dict[str, object]:
     fund_codes = load_watchlist_codes()
@@ -311,8 +364,41 @@ def delete_watchlist_fund(fund_code: str) -> dict[str, object]:
 
 
 @app.get("/reports")
-def list_reports(limit: int = 20) -> dict[str, object]:
-    return load_report_summaries(limit=limit)
+def list_reports(
+    start_date: date | None = None,
+    end_date: date | None = None,
+    data_source: str | None = None,
+    analysis_mode: str | None = None,
+    fund_code: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, object]:
+    if start_date is not None and end_date is not None and start_date > end_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="start_date must be earlier than or equal to end_date.",
+        )
+    if fund_code is not None and not fund_code.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="fund_code must not be empty.",
+        )
+
+    try:
+        return load_report_summaries(
+            start_date=start_date,
+            end_date=end_date,
+            data_source=data_source,
+            analysis_mode=analysis_mode,
+            fund_code=fund_code,
+            limit=limit,
+            offset=offset,
+        )
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is unavailable.",
+        ) from exc
 
 
 @app.get("/reports/latest")
@@ -400,14 +486,47 @@ def run_report(request: ReportRunRequest) -> dict[str, object]:
 
 
 @app.get("/task-runs")
-def list_task_runs(limit: int = 20) -> dict[str, object]:
-    normalized_limit = max(1, min(limit, 100))
-    all_records = load_task_run_records()
-    records = list(reversed(all_records))[:normalized_limit]
+def list_task_runs(
+    status_value: Annotated[str | None, Query(alias="status")] = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    has_report: bool | None = None,
+    failed_only: bool = False,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, object]:
+    if start_date is not None and end_date is not None and start_date > end_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="start_date must be earlier than or equal to end_date.",
+        )
+    if status_value is not None and not status_value.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="status must not be empty.",
+        )
+
+    try:
+        records, total = query_task_run_records(
+            status_value=status_value,
+            start_date=start_date,
+            end_date=end_date,
+            has_report=has_report,
+            failed_only=failed_only,
+            limit=limit,
+            offset=offset,
+        )
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is unavailable.",
+        ) from exc
+
     return {
         "count": len(records),
-        "total": len(all_records),
-        "limit": normalized_limit,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
         "task_runs": records,
     }
 

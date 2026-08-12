@@ -4,15 +4,17 @@ const api = {
     `/funds/${encodeURIComponent(fundCode)}?use_real_data=${useRealData}`,
   fundSnapshots: (fundCode, limit = 10) =>
     `/funds/${encodeURIComponent(fundCode)}/snapshots?limit=${limit}`,
+  fundTrend: (fundCode, params = {}) =>
+    buildQueryUrl(`/funds/${encodeURIComponent(fundCode)}/trend`, { limit: 10, ...params }),
   watchlist: "/watchlist",
   addWatchlistFund: "/watchlist/funds",
   deleteWatchlistFund: (fundCode) => `/watchlist/funds/${encodeURIComponent(fundCode)}`,
   runReport: "/reports/run",
-  reports: "/reports?limit=8",
+  reports: (params = {}) => buildQueryUrl("/reports", { limit: 8, ...params }),
   reportDetail: (reportId) => `/reports/${encodeURIComponent(reportId)}`,
   latestReport: "/reports/latest",
   scheduleStatus: "/schedule/status",
-  taskRuns: "/task-runs?limit=8",
+  taskRuns: (params = {}) => buildQueryUrl("/task-runs", { limit: 8, ...params }),
   taskRunDetail: (taskId) => `/task-runs/${encodeURIComponent(taskId)}`,
   rerunTaskRun: (taskId) => `/task-runs/${encodeURIComponent(taskId)}/rerun`,
   snapshots: "/fund-snapshots?limit=8",
@@ -40,10 +42,34 @@ const elements = {
   fundLookupUseRealData: document.querySelector("#fund-lookup-use-real-data"),
   fundLookupMessage: document.querySelector("#fund-lookup-message"),
   fundLookupResult: document.querySelector("#fund-lookup-result"),
+  fundTrendFilterForm: document.querySelector("#fund-trend-filter-form"),
+  fundTrendStartDate: document.querySelector("#fund-trend-start-date"),
+  fundTrendEndDate: document.querySelector("#fund-trend-end-date"),
+  fundTrendFilterButton: document.querySelector("#fund-trend-filter-button"),
+  fundTrendResetButton: document.querySelector("#fund-trend-reset-button"),
   fundDetailMessage: document.querySelector("#fund-detail-message"),
   fundDetailResult: document.querySelector("#fund-detail-result"),
+  reportFilterForm: document.querySelector("#report-filter-form"),
+  reportFilterStartDate: document.querySelector("#report-filter-start-date"),
+  reportFilterEndDate: document.querySelector("#report-filter-end-date"),
+  reportFilterFundCode: document.querySelector("#report-filter-fund-code"),
+  reportFilterDataSource: document.querySelector("#report-filter-data-source"),
+  reportFilterButton: document.querySelector("#report-filter-button"),
   reportHistory: document.querySelector("#report-history"),
+  taskFilterForm: document.querySelector("#task-filter-form"),
+  taskFilterStatus: document.querySelector("#task-filter-status"),
+  taskFilterStartDate: document.querySelector("#task-filter-start-date"),
+  taskFilterEndDate: document.querySelector("#task-filter-end-date"),
+  taskFilterHasReport: document.querySelector("#task-filter-has-report"),
+  taskFilterFailedOnly: document.querySelector("#task-filter-failed-only"),
+  taskFilterButton: document.querySelector("#task-filter-button"),
   taskRuns: document.querySelector("#task-runs"),
+  snapshotFilterForm: document.querySelector("#snapshot-filter-form"),
+  snapshotFilterFundCode: document.querySelector("#snapshot-filter-fund-code"),
+  snapshotFilterStartDate: document.querySelector("#snapshot-filter-start-date"),
+  snapshotFilterEndDate: document.querySelector("#snapshot-filter-end-date"),
+  snapshotFilterButton: document.querySelector("#snapshot-filter-button"),
+  snapshotFilterMessage: document.querySelector("#snapshot-filter-message"),
   snapshots: document.querySelector("#fund-snapshots"),
   runWatchlistReportButton: document.querySelector("#run-watchlist-report-button"),
   reportUseRealData: document.querySelector("#report-use-real-data"),
@@ -54,6 +80,19 @@ const elements = {
 
 let latestLookupFund = null;
 let selectedReportId = null;
+let selectedFundDetailCode = null;
+
+function buildQueryUrl(path, params = {}) {
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === null || value === undefined || value === "") {
+      return;
+    }
+    searchParams.set(key, String(value));
+  });
+  const queryString = searchParams.toString();
+  return queryString ? `${path}?${queryString}` : path;
+}
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
@@ -157,6 +196,11 @@ function setReportActionMessage(message, type = "") {
   elements.reportActionMessage.className = `form-message ${type}`;
 }
 
+function setSnapshotFilterMessage(message, type = "") {
+  elements.snapshotFilterMessage.textContent = message;
+  elements.snapshotFilterMessage.className = `form-message ${type}`;
+}
+
 function formatOptionalPercent(value) {
   if (value === null || value === undefined || value === "") {
     return "-";
@@ -216,8 +260,7 @@ function buildFundTrendChart(snapshots) {
       nav: toNumber(snapshot.nav),
       date: snapshot.nav_date ?? snapshot.report_date ?? "-",
     }))
-    .filter((point) => point.nav !== null)
-    .reverse();
+    .filter((point) => point.nav !== null);
 
   if (points.length < 2) {
     return `
@@ -258,6 +301,74 @@ function buildFundTrendChart(snapshots) {
       </div>
     </div>
   `;
+}
+
+function buildReportFilterUrl() {
+  return api.reports({
+    start_date: elements.reportFilterStartDate.value,
+    end_date: elements.reportFilterEndDate.value,
+    fund_code: elements.reportFilterFundCode.value.trim(),
+    data_source: elements.reportFilterDataSource.value.trim(),
+  });
+}
+
+function buildTaskRunFilterUrl() {
+  return api.taskRuns({
+    status: elements.taskFilterStatus.value,
+    start_date: elements.taskFilterStartDate.value,
+    end_date: elements.taskFilterEndDate.value,
+    has_report: elements.taskFilterHasReport.value,
+    failed_only: elements.taskFilterFailedOnly.checked ? "true" : "",
+  });
+}
+
+function buildFundTrendFilterUrl(fundCode) {
+  return api.fundTrend(fundCode, {
+    start_date: elements.fundTrendStartDate.value,
+    end_date: elements.fundTrendEndDate.value,
+  });
+}
+
+function buildSnapshotFilterUrl() {
+  const fundCode = elements.snapshotFilterFundCode.value.trim();
+  if (!fundCode) {
+    return api.snapshots;
+  }
+  return api.fundTrend(fundCode, {
+    start_date: elements.snapshotFilterStartDate.value,
+    end_date: elements.snapshotFilterEndDate.value,
+  });
+}
+
+function describeBackendTrendSummary(summary, snapshotCount) {
+  if (!summary || snapshotCount < 2) {
+    return {
+      navSummary: "历史快照不足，暂不能判断净值趋势。",
+      riskSummary: "历史快照不足，暂不能判断风险等级变化。",
+      riskLevelChanged: false,
+    };
+  }
+
+  const firstNav = summary.first_nav;
+  const latestNav = summary.latest_nav;
+  const navChange = summary.nav_change;
+  const navChangePercent = summary.nav_change_percent;
+  const riskChangeCount = Number(summary.risk_level_changes ?? 0);
+  const direction = Number(navChange) > 0 ? "上升" : Number(navChange) < 0 ? "下降" : "持平";
+  const navSummary =
+    firstNav !== null && latestNav !== null && navChange !== null
+      ? `区间净值从 ${firstNav} 到 ${latestNav}，${direction} ${Math.abs(Number(navChange)).toFixed(4)}（${navChangePercent === null ? "-" : `${Number(navChangePercent) >= 0 ? "+" : ""}${Number(navChangePercent).toFixed(2)}%`}）。`
+      : "净值趋势暂不可用，缺少可比较的净值数据。";
+  const riskSummary =
+    riskChangeCount > 0
+      ? `风险等级变化 ${riskChangeCount} 次：${summary.first_risk_level ?? "-"} -> ${summary.latest_risk_level ?? "-"}。`
+      : `风险等级保持为 ${summary.latest_risk_level ?? "-"}。`;
+
+  return {
+    navSummary,
+    riskSummary,
+    riskLevelChanged: riskChangeCount > 0,
+  };
 }
 
 function renderWatchlist(data) {
@@ -338,6 +449,8 @@ function renderFundLookupResult(data) {
 
 function renderFundDetail(data) {
   const snapshots = data.snapshots ?? [];
+  const displaySnapshots = [...snapshots].reverse();
+  const summary = data.summary ?? {};
   elements.fundDetailResult.classList.remove("empty");
 
   if (snapshots.length === 0) {
@@ -350,8 +463,8 @@ function renderFundDetail(data) {
     return;
   }
 
-  const latestSnapshot = snapshots[0] ?? {};
-  const trendSummary = buildFundTrendSummary(snapshots);
+  const latestSnapshot = displaySnapshots[0] ?? {};
+  const trendSummary = describeBackendTrendSummary(summary, snapshots.length);
   const trendChart = buildFundTrendChart(snapshots);
   elements.fundDetailResult.innerHTML = `
     <div class="fund-detail-card">
@@ -371,6 +484,7 @@ function renderFundDetail(data) {
       <div class="trend-summary ${trendSummary.riskLevelChanged ? "risk-changed" : ""}">
         <p>${escapeHtml(trendSummary.navSummary)}</p>
         <p>${escapeHtml(trendSummary.riskSummary)}</p>
+        <p>最高净值：${escapeHtml(summary.highest_nav ?? "-")} / 最低净值：${escapeHtml(summary.lowest_nav ?? "-")} / 区间变化：${escapeHtml(summary.nav_change ?? "-")}</p>
       </div>
       ${trendChart}
       <div class="snapshot-table">
@@ -380,7 +494,7 @@ function renderFundDetail(data) {
           <span>日涨跌</span>
           <span>风险</span>
         </div>
-        ${snapshots
+        ${displaySnapshots
           .map(
             (snapshot) => `
               <div class="snapshot-row">
@@ -626,7 +740,20 @@ function renderSnapshots(data) {
     return;
   }
 
-  elements.snapshots.innerHTML = snapshots
+  const summary = data.summary ?? null;
+  const summaryHtml = summary
+    ? `
+      <div class="snapshot-filter-summary">
+        <strong>${escapeHtml(data.fund_code ?? "-")} 区间统计</strong>
+        <span>净值变化：${escapeHtml(summary.nav_change ?? "-")} / ${escapeHtml(summary.nav_change_percent ?? "-")}%</span>
+        <span>最高：${escapeHtml(summary.highest_nav ?? "-")} / 最低：${escapeHtml(summary.lowest_nav ?? "-")}</span>
+        <span>风险变化：${escapeHtml(summary.risk_level_changes ?? 0)} 次</span>
+      </div>
+    `
+    : "";
+  const displaySnapshots = summary ? [...snapshots].reverse() : snapshots;
+
+  elements.snapshots.innerHTML = summaryHtml + displaySnapshots
     .map((item) => {
       const risk = item.risk_level ?? "unknown";
       const change = item.daily_change_percent;
@@ -665,9 +792,9 @@ async function loadDashboard() {
     fetchJson(api.watchlist).then(renderWatchlist).catch((error) => renderError(elements.watchlist, error.message)),
     fetchJson(api.latestReport).then(renderLatestReport).catch((error) => renderError(elements.latestReport, error.message)),
     fetchJson(api.scheduleStatus).then(renderScheduleStatus).catch((error) => renderError(elements.scheduleStatus, error.message)),
-    fetchJson(api.reports).then(renderReportHistory).catch((error) => renderError(elements.reportHistory, error.message)),
-    fetchJson(api.taskRuns).then(renderTaskRuns).catch((error) => renderError(elements.taskRuns, error.message)),
-    fetchJson(api.snapshots).then(renderSnapshots).catch((error) => renderError(elements.snapshots, error.message)),
+    fetchJson(buildReportFilterUrl()).then(renderReportHistory).catch((error) => renderError(elements.reportHistory, error.message)),
+    fetchJson(buildTaskRunFilterUrl()).then(renderTaskRuns).catch((error) => renderError(elements.taskRuns, error.message)),
+    fetchJson(buildSnapshotFilterUrl()).then(renderSnapshots).catch((error) => renderError(elements.snapshots, error.message)),
   ];
 
   await Promise.allSettled(tasks);
@@ -698,6 +825,10 @@ async function loadFundSnapshots(fundCode, limit = 10) {
   return fetchJson(api.fundSnapshots(fundCode, limit));
 }
 
+async function loadFundTrend(fundCode) {
+  return fetchJson(buildFundTrendFilterUrl(fundCode));
+}
+
 async function loadReportDetail(reportId) {
   return fetchJson(api.reportDetail(reportId));
 }
@@ -712,7 +843,7 @@ async function loadInitialReportFromUrl() {
   try {
     const data = await loadReportDetail(reportId);
     renderLatestReport(data);
-    const reports = await fetchJson(api.reports);
+    const reports = await fetchJson(buildReportFilterUrl());
     renderReportHistory(reports);
     setReportActionMessage(`已打开通知中的报告 #${reportId}。`, "success");
   } catch (error) {
@@ -850,10 +981,110 @@ async function handleFundLookupResultClick(event) {
 }
 
 async function openFundDetail(fundCode) {
+  selectedFundDetailCode = fundCode;
   setFundDetailMessage(`正在加载 ${fundCode} 的历史快照...`);
-  const data = await loadFundSnapshots(fundCode, 10);
+  const data = await loadFundTrend(fundCode);
   renderFundDetail(data);
   setFundDetailMessage(`已加载 ${fundCode} 的历史快照。`, "success");
+}
+
+async function handleFundTrendFilterSubmit(event) {
+  event.preventDefault();
+  if (!selectedFundDetailCode) {
+    setFundDetailMessage("请先打开一个基金详情。", "error");
+    return;
+  }
+
+  elements.fundTrendFilterButton.disabled = true;
+  setFundDetailMessage(`正在按条件筛选 ${selectedFundDetailCode} 的历史快照...`);
+  try {
+    const data = await loadFundTrend(selectedFundDetailCode);
+    renderFundDetail(data);
+    setFundDetailMessage(`已筛选 ${selectedFundDetailCode} 的历史快照。`, "success");
+  } catch (error) {
+    setFundDetailMessage(error.message, "error");
+  } finally {
+    elements.fundTrendFilterButton.disabled = false;
+  }
+}
+
+async function handleReportFilterSubmit(event) {
+  event.preventDefault();
+  elements.reportFilterButton.disabled = true;
+  elements.reportHistory.classList.add("loading");
+  elements.reportHistory.innerHTML = "正在筛选历史报告...";
+  try {
+    const reports = await fetchJson(buildReportFilterUrl());
+    renderReportHistory(reports);
+  } catch (error) {
+    renderError(elements.reportHistory, error.message);
+  } finally {
+    elements.reportFilterButton.disabled = false;
+  }
+}
+
+async function handleTaskFilterSubmit(event) {
+  event.preventDefault();
+  elements.taskFilterButton.disabled = true;
+  elements.taskRuns.classList.add("loading");
+  elements.taskRuns.innerHTML = "正在筛选任务日志...";
+  try {
+    const taskRuns = await fetchJson(buildTaskRunFilterUrl());
+    renderTaskRuns(taskRuns);
+  } catch (error) {
+    renderError(elements.taskRuns, error.message);
+  } finally {
+    elements.taskFilterButton.disabled = false;
+  }
+}
+
+async function handleSnapshotFilterSubmit(event) {
+  event.preventDefault();
+  elements.snapshotFilterButton.disabled = true;
+  elements.snapshots.classList.add("loading");
+  elements.snapshots.innerHTML = "正在筛选基金快照...";
+  setSnapshotFilterMessage("");
+  try {
+    const snapshots = await fetchJson(buildSnapshotFilterUrl());
+    renderSnapshots(snapshots);
+    if (elements.snapshotFilterFundCode.value.trim()) {
+      setSnapshotFilterMessage("已按基金代码筛选快照趋势。", "success");
+    }
+  } catch (error) {
+    renderError(elements.snapshots, error.message);
+    setSnapshotFilterMessage(error.message, "error");
+  } finally {
+    elements.snapshotFilterButton.disabled = false;
+  }
+}
+
+async function handleFilterReset(event) {
+  if (!(event.target instanceof Element)) {
+    return;
+  }
+
+  const resetButton = event.target.closest("[data-filter-reset]");
+  if (!resetButton) {
+    return;
+  }
+
+  const target = resetButton.dataset.filterReset;
+  if (target === "fund-trend") {
+    elements.fundTrendFilterForm.reset();
+    if (selectedFundDetailCode) {
+      await openFundDetail(selectedFundDetailCode);
+    }
+  } else if (target === "reports") {
+    elements.reportFilterForm.reset();
+    await handleReportFilterSubmit(new Event("submit"));
+  } else if (target === "tasks") {
+    elements.taskFilterForm.reset();
+    await handleTaskFilterSubmit(new Event("submit"));
+  } else if (target === "snapshots") {
+    elements.snapshotFilterForm.reset();
+    setSnapshotFilterMessage("");
+    await handleSnapshotFilterSubmit(new Event("submit"));
+  }
 }
 
 async function handleReportHistoryClick(event) {
@@ -876,7 +1107,7 @@ async function handleReportHistoryClick(event) {
   try {
     const data = await loadReportDetail(reportId);
     renderLatestReport(data);
-    const reports = await fetchJson(api.reports);
+    const reports = await fetchJson(buildReportFilterUrl());
     renderReportHistory(reports);
     setReportActionMessage(`已打开历史报告 #${reportId}。`, "success");
   } catch (error) {
@@ -912,7 +1143,7 @@ async function handleTaskRunsClick(event) {
       setReportActionMessage(`正在打开任务关联报告 #${reportId}...`);
       const data = await loadReportDetail(reportId);
       renderLatestReport(data);
-      const reports = await fetchJson(api.reports);
+      const reports = await fetchJson(buildReportFilterUrl());
       renderReportHistory(reports);
       setReportActionMessage(`已打开任务关联报告 #${reportId}。`, "success");
     } else if (action === "rerun" && taskId) {
@@ -1031,6 +1262,14 @@ elements.watchlistForm.addEventListener("submit", handleWatchlistSubmit);
 elements.watchlist.addEventListener("click", handleWatchlistClick);
 elements.fundLookupForm.addEventListener("submit", handleFundLookupSubmit);
 elements.fundLookupResult.addEventListener("click", handleFundLookupResultClick);
+elements.fundTrendFilterForm.addEventListener("submit", handleFundTrendFilterSubmit);
+elements.fundTrendResetButton.addEventListener("click", handleFilterReset);
+elements.reportFilterForm.addEventListener("submit", handleReportFilterSubmit);
+elements.reportFilterForm.addEventListener("click", handleFilterReset);
 elements.reportHistory.addEventListener("click", handleReportHistoryClick);
+elements.taskFilterForm.addEventListener("submit", handleTaskFilterSubmit);
+elements.taskFilterForm.addEventListener("click", handleFilterReset);
 elements.taskRuns.addEventListener("click", handleTaskRunsClick);
+elements.snapshotFilterForm.addEventListener("submit", handleSnapshotFilterSubmit);
+elements.snapshotFilterForm.addEventListener("click", handleFilterReset);
 loadDashboard();

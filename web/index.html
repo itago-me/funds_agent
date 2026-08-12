@@ -123,6 +123,20 @@
             <div class="section-heading compact">
               <h2>基金详情</h2>
             </div>
+            <form id="fund-trend-filter-form" class="filter-form compact-filter">
+              <label>
+                <span>开始</span>
+                <input id="fund-trend-start-date" name="start_date" type="date" />
+              </label>
+              <label>
+                <span>结束</span>
+                <input id="fund-trend-end-date" name="end_date" type="date" />
+              </label>
+              <div class="filter-actions">
+                <button id="fund-trend-filter-button" type="submit">应用</button>
+                <button id="fund-trend-reset-button" type="button" data-filter-reset="fund-trend">清空</button>
+              </div>
+            </form>
             <div id="fund-detail-message" class="form-message"></div>
             <div id="fund-detail-result" class="fund-detail empty">从自选基金或临时查询结果中打开详情。</div>
           </article>
@@ -131,6 +145,41 @@
             <div class="section-heading compact">
               <h2>历史报告</h2>
             </div>
+            <form id="report-filter-form" class="filter-form">
+              <label>
+                <span>开始</span>
+                <input id="report-filter-start-date" name="start_date" type="date" />
+              </label>
+              <label>
+                <span>结束</span>
+                <input id="report-filter-end-date" name="end_date" type="date" />
+              </label>
+              <label>
+                <span>基金</span>
+                <input
+                  id="report-filter-fund-code"
+                  name="fund_code"
+                  type="text"
+                  inputmode="numeric"
+                  placeholder="基金代码"
+                  autocomplete="off"
+                />
+              </label>
+              <label>
+                <span>数据源</span>
+                <input
+                  id="report-filter-data-source"
+                  name="data_source"
+                  type="text"
+                  placeholder="akshare"
+                  autocomplete="off"
+                />
+              </label>
+              <div class="filter-actions">
+                <button id="report-filter-button" type="submit">筛选</button>
+                <button id="report-filter-reset-button" type="button" data-filter-reset="reports">清空</button>
+              </div>
+            </form>
             <div id="report-history" class="report-history loading">加载中...</div>
           </article>
 
@@ -138,6 +187,40 @@
             <div class="section-heading compact">
               <h2>最近任务</h2>
             </div>
+            <form id="task-filter-form" class="filter-form">
+              <label>
+                <span>状态</span>
+                <select id="task-filter-status" name="status">
+                  <option value="">全部</option>
+                  <option value="success">success</option>
+                  <option value="failed">failed</option>
+                </select>
+              </label>
+              <label>
+                <span>开始</span>
+                <input id="task-filter-start-date" name="start_date" type="date" />
+              </label>
+              <label>
+                <span>结束</span>
+                <input id="task-filter-end-date" name="end_date" type="date" />
+              </label>
+              <label>
+                <span>报告</span>
+                <select id="task-filter-has-report" name="has_report">
+                  <option value="">全部</option>
+                  <option value="true">有关联</option>
+                  <option value="false">未关联</option>
+                </select>
+              </label>
+              <label class="option-toggle filter-check">
+                <input id="task-filter-failed-only" name="failed_only" type="checkbox" />
+                <span>只看失败</span>
+              </label>
+              <div class="filter-actions">
+                <button id="task-filter-button" type="submit">筛选</button>
+                <button id="task-filter-reset-button" type="button" data-filter-reset="tasks">清空</button>
+              </div>
+            </form>
             <div id="task-runs" class="timeline loading">加载中...</div>
           </article>
 
@@ -145,6 +228,32 @@
             <div class="section-heading compact">
               <h2>基金快照</h2>
             </div>
+            <form id="snapshot-filter-form" class="filter-form">
+              <label>
+                <span>基金</span>
+                <input
+                  id="snapshot-filter-fund-code"
+                  name="fund_code"
+                  type="text"
+                  inputmode="numeric"
+                  placeholder="基金代码"
+                  autocomplete="off"
+                />
+              </label>
+              <label>
+                <span>开始</span>
+                <input id="snapshot-filter-start-date" name="start_date" type="date" />
+              </label>
+              <label>
+                <span>结束</span>
+                <input id="snapshot-filter-end-date" name="end_date" type="date" />
+              </label>
+              <div class="filter-actions">
+                <button id="snapshot-filter-button" type="submit">筛选</button>
+                <button id="snapshot-filter-reset-button" type="button" data-filter-reset="snapshots">清空</button>
+              </div>
+            </form>
+            <div id="snapshot-filter-message" class="form-message"></div>
             <div id="fund-snapshots" class="snapshot-list loading">加载中...</div>
           </article>
         </aside>

@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Callable
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from src.db import get_session_factory
 from src.models import FundSnapshot
@@ -49,6 +49,97 @@ def load_fund_snapshots(
         "total": len(latest_first),
         "limit": normalized_limit,
         "snapshots": latest_first[:normalized_limit],
+    }
+
+
+def load_fund_snapshot_trend(
+    fund_code: object,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    limit: int = 100,
+    session_factory: SessionFactory | None = None,
+) -> dict[str, object]:
+    normalized_code = normalize_fund_code(fund_code)
+    normalized_limit = _normalize_limit(limit, maximum=500)
+    factory = session_factory or _default_session_factory()
+
+    with factory() as session:
+        filters = [FundSnapshot.fund_code == normalized_code]
+        if start_date is not None:
+            filters.append(FundSnapshot.report_date >= start_date)
+        if end_date is not None:
+            filters.append(FundSnapshot.report_date <= end_date)
+
+        total = session.execute(
+            select(func.count()).select_from(FundSnapshot).where(*filters)
+        ).scalar_one()
+        latest_snapshots = session.execute(
+            select(FundSnapshot)
+            .where(*filters)
+            .order_by(FundSnapshot.report_date.desc(), FundSnapshot.id.desc())
+            .limit(normalized_limit)
+        ).scalars().all()
+
+    records = [
+        _record_from_model(snapshot)
+        for snapshot in reversed(latest_snapshots)
+    ]
+    return {
+        "fund_code": normalized_code,
+        "start_date": _format_date(start_date),
+        "end_date": _format_date(end_date),
+        "count": len(records),
+        "total": int(total),
+        "limit": normalized_limit,
+        "summary": build_fund_snapshot_trend_summary(records),
+        "snapshots": records,
+    }
+
+
+def build_fund_snapshot_trend_summary(
+    records: list[dict[str, object]],
+) -> dict[str, object]:
+    nav_points = [
+        (record, to_float(record.get("nav")))
+        for record in records
+        if to_float(record.get("nav")) is not None
+    ]
+    risk_levels = [
+        str(record.get("risk_level"))
+        for record in records
+        if record.get("risk_level") not in (None, "")
+    ]
+
+    first_nav = nav_points[0][1] if nav_points else None
+    latest_nav = nav_points[-1][1] if nav_points else None
+    nav_change = None
+    nav_change_percent = None
+    if first_nav is not None and latest_nav is not None:
+        nav_change = round(latest_nav - first_nav, 4)
+        if first_nav != 0:
+            nav_change_percent = round(nav_change / first_nav * 100, 2)
+
+    highest_nav = max((point[1] for point in nav_points), default=None)
+    lowest_nav = min((point[1] for point in nav_points), default=None)
+    risk_level_changes = sum(
+        1
+        for previous, current in zip(risk_levels, risk_levels[1:])
+        if previous != current
+    )
+
+    return {
+        "first_report_date": records[0].get("report_date") if records else None,
+        "latest_report_date": records[-1].get("report_date") if records else None,
+        "first_nav": first_nav,
+        "latest_nav": latest_nav,
+        "nav_change": nav_change,
+        "nav_change_percent": nav_change_percent,
+        "highest_nav": highest_nav,
+        "lowest_nav": lowest_nav,
+        "first_risk_level": risk_levels[0] if risk_levels else None,
+        "latest_risk_level": risk_levels[-1] if risk_levels else None,
+        "risk_level_changes": risk_level_changes,
     }
 
 

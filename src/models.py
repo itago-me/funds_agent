@@ -15,6 +15,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -55,6 +56,27 @@ class Report(Base):
     task_runs: Mapped[list["TaskRun"]] = relationship(
         back_populates="report",
     )
+    report_funds: Mapped[list["ReportFund"]] = relationship(
+        back_populates="report",
+        cascade="all, delete-orphan",
+    )
+
+
+class ReportFund(Base):
+    __tablename__ = "report_funds"
+    __table_args__ = (
+        UniqueConstraint("report_id", "fund_code", name="uq_report_funds_report_code"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    report_id: Mapped[int] = mapped_column(
+        ForeignKey("reports.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    fund_code: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+
+    report: Mapped[Report] = relationship(back_populates="report_funds")
 
 
 class TaskRun(Base):

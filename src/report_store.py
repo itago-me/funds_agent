@@ -6,12 +6,13 @@ import json
 from contextlib import AbstractContextManager
 from datetime import date, datetime
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from src.db import get_session_factory
-from src.models import Report
+from src.models import Report, ReportFund
+from src.watchlist_common import normalize_fund_code, normalize_fund_codes
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -90,16 +91,22 @@ def _record_from_model(report: Report) -> dict[str, object]:
 
 
 def _model_from_record(record: dict[str, object]) -> Report:
-    return Report(
+    fund_codes = _normalize_list(record.get("fund_codes"))
+    report = Report(
         created_at=_parse_datetime(record.get("created_at")),
         report_date=_parse_date(record.get("report_date")),
         report_path=str(record.get("report_path") or ""),
         data_source=str(record.get("data_source") or ""),
         analysis_mode=str(record.get("analysis_mode") or ""),
-        fund_codes=_normalize_list(record.get("fund_codes")),
+        fund_codes=fund_codes,
         warnings=_normalize_list(record.get("warnings")),
         history_comparison=_normalize_dict(record.get("history_comparison")),
     )
+    report.report_funds = [
+        ReportFund(fund_code=fund_code)
+        for fund_code in normalize_fund_codes(fund_codes)
+    ]
+    return report
 
 
 def _append_jsonl_record(path: Path, record: dict[str, object]) -> None:
@@ -151,6 +158,52 @@ def load_report_records(
     return []
 
 
+def query_report_records(
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    data_source: str | None = None,
+    analysis_mode: str | None = None,
+    fund_code: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+    session_factory: SessionFactory | None = None,
+) -> tuple[list[dict[str, object]], int]:
+    """Query report metadata in the database without loading every row."""
+    conditions: list[Any] = []
+    if start_date is not None:
+        conditions.append(Report.report_date >= start_date)
+    if end_date is not None:
+        conditions.append(Report.report_date <= end_date)
+    if data_source:
+        conditions.append(Report.data_source == data_source)
+    if analysis_mode:
+        conditions.append(Report.analysis_mode == analysis_mode)
+    if fund_code is not None:
+        normalized_code = normalize_fund_code(fund_code)
+        conditions.append(
+            Report.report_funds.any(ReportFund.fund_code == normalized_code)
+        )
+
+    normalized_limit = max(1, min(limit, 100))
+    normalized_offset = max(0, offset)
+    factory = session_factory or _default_session_factory()
+
+    with factory() as session:
+        total = session.execute(
+            select(func.count()).select_from(Report).where(*conditions)
+        ).scalar_one()
+        reports = session.execute(
+            select(Report)
+            .where(*conditions)
+            .order_by(Report.report_date.desc(), Report.id.desc())
+            .offset(normalized_offset)
+            .limit(normalized_limit)
+        ).scalars().all()
+
+    return [_record_from_model(report) for report in reports], int(total)
+
+
 def append_report_record(
     *,
     report_path: Path,
@@ -175,11 +228,14 @@ def append_report_record(
     }
 
     factory = session_factory or _default_session_factory()
+    database_error: Exception | None = None
     try:
         with factory() as session:
             session.add(_model_from_record(record))
             session.commit()
-    except Exception:
-        pass
+    except Exception as exc:
+        database_error = exc
 
     _append_jsonl_record(report_index_path, record)
+    if database_error is not None:
+        raise database_error

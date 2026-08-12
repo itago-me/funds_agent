@@ -47,7 +47,8 @@ button:disabled {
   opacity: 0.6;
 }
 
-input {
+input,
+select {
   width: 100%;
   min-width: 0;
   border: 1px solid var(--line);
@@ -59,7 +60,8 @@ input {
   outline: none;
 }
 
-input:focus {
+input:focus,
+select:focus {
   border-color: rgba(31, 122, 77, 0.55);
   box-shadow: 0 0 0 4px rgba(31, 122, 77, 0.1);
 }
@@ -466,6 +468,52 @@ h2 {
   margin-bottom: 0.6rem;
 }
 
+.filter-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+.filter-form label {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.filter-form label span {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.compact-filter {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.filter-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 0.5rem;
+}
+
+.filter-actions button {
+  flex: 1 1 0;
+  padding: 0.62rem 0.8rem;
+  font-size: 0.86rem;
+}
+
+.filter-actions button[type="button"] {
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: #fffdf8;
+  box-shadow: none;
+}
+
+.filter-check {
+  grid-column: 1 / -1;
+  width: fit-content;
+}
+
 .form-message {
   min-height: 1.4rem;
   margin-bottom: 0.65rem;
@@ -711,6 +759,21 @@ h2 {
 .snapshot-list {
   display: grid;
   gap: 0.7rem;
+}
+
+.snapshot-filter-summary {
+  display: grid;
+  gap: 0.3rem;
+  border: 1px solid rgba(49, 92, 138, 0.18);
+  border-radius: 14px;
+  padding: 0.75rem;
+  color: var(--muted);
+  font-size: 0.84rem;
+  background: rgba(49, 92, 138, 0.06);
+}
+
+.snapshot-filter-summary strong {
+  color: var(--ink);
 }
 
 .timeline-item,
