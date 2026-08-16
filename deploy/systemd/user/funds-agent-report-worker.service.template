@@ -1,0 +1,15 @@
+[Unit]
+Description=Funds Agent report worker
+Documentation=file:@PROJECT_DIR@/docs/worker_service.md
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=@PROJECT_DIR@
+ExecStart=@PYTHON_BIN@ -m src.report_worker_cli --poll-interval 1.0
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

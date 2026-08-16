@@ -10,6 +10,7 @@ const api = {
   addWatchlistFund: "/watchlist/funds",
   deleteWatchlistFund: (fundCode) => `/watchlist/funds/${encodeURIComponent(fundCode)}`,
   runReport: "/reports/run",
+  runReportAsync: "/reports/run-async",
   reports: (params = {}) => buildQueryUrl("/reports", { limit: 8, ...params }),
   reportDetail: (reportId) => `/reports/${encodeURIComponent(reportId)}`,
   latestReport: "/reports/latest",
@@ -81,6 +82,9 @@ const elements = {
 let latestLookupFund = null;
 let selectedReportId = null;
 let selectedFundDetailCode = null;
+const TASK_POLL_INTERVAL_MS = 2000;
+const TERMINAL_TASK_STATUSES = ["success", "failed"];
+const activeReportPollTimers = new Map();
 
 function buildQueryUrl(path, params = {}) {
   const searchParams = new URLSearchParams();
@@ -685,7 +689,10 @@ function renderTaskRuns(data) {
     .join("");
 }
 
-function renderTaskRunDetail(taskRun) {
+function renderTaskRunDetail(data) {
+  const taskRun = data.task_run ?? data;
+  const progress = data.progress ?? null;
+  const progressAvailable = data.progress_available !== false;
   const warnings = Array.isArray(taskRun.warnings) ? taskRun.warnings : [];
   const fundCodes = Array.isArray(taskRun.fund_codes) ? taskRun.fund_codes : [];
   const runOptions = taskRun.run_options && typeof taskRun.run_options === "object" ? taskRun.run_options : {};
@@ -699,9 +706,27 @@ function renderTaskRunDetail(taskRun) {
     warnings.length > 0
       ? `<ul>${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>`
       : "<p>无 warning。</p>";
+  const progressDetail = progress
+    ? `
+      <div class="task-detail-section task-progress ${escapeHtml(progress.status ?? "")}">
+        <span>任务进度</span>
+        <p>
+          ${escapeHtml(progress.status ?? taskRun.status ?? "unknown")}：
+          ${escapeHtml(progress.message ?? "暂无进度说明。")}
+          / 更新于 ${escapeHtml(formatDateTime(progress.updated_at))}
+        </p>
+      </div>
+    `
+    : `
+      <div class="task-detail-section task-progress">
+        <span>任务进度</span>
+        <p>${progressAvailable ? "暂无 Redis 实时进度。" : "Redis 进度暂不可用，当前展示持久任务状态。"}</p>
+      </div>
+    `;
 
   return `
     <div class="task-detail">
+      ${progressDetail}
       <div class="task-detail-grid">
         <div><span>开始时间</span><strong>${escapeHtml(formatDateTime(taskRun.started_at))}</strong></div>
         <div><span>结束时间</span><strong>${escapeHtml(formatDateTime(taskRun.finished_at))}</strong></div>
@@ -855,6 +880,68 @@ async function loadTaskRunDetail(taskId) {
   return fetchJson(api.taskRunDetail(taskId));
 }
 
+function clearReportTaskPolling(taskId) {
+  const timerId = activeReportPollTimers.get(String(taskId));
+  if (timerId !== undefined) {
+    window.clearTimeout(timerId);
+    activeReportPollTimers.delete(String(taskId));
+  }
+}
+
+function getReportTaskStatus(data) {
+  return String(data.progress?.status ?? data.task_run?.status ?? "unknown");
+}
+
+function getReportTaskMessage(data) {
+  const progress = data.progress;
+  if (progress?.message) {
+    return progress.message;
+  }
+  if (data.progress_available === false) {
+    return "Redis 进度暂不可用，正在读取持久任务状态。";
+  }
+  return "等待 worker 更新任务进度。";
+}
+
+function startReportTaskPolling(
+  taskId,
+  {
+    onUpdate = () => {},
+    onComplete = () => {},
+    onError = () => {},
+  } = {},
+) {
+  const taskKey = String(taskId);
+  clearReportTaskPolling(taskKey);
+
+  const poll = async () => {
+    try {
+      const data = await loadTaskRunDetail(taskId);
+      const status = getReportTaskStatus(data);
+      onUpdate({
+        data,
+        status,
+        message: getReportTaskMessage(data),
+      });
+
+      if (TERMINAL_TASK_STATUSES.includes(status)) {
+        clearReportTaskPolling(taskKey);
+        await loadDashboard();
+        onComplete(data, status);
+        return;
+      }
+
+      const timerId = window.setTimeout(poll, TASK_POLL_INTERVAL_MS);
+      activeReportPollTimers.set(taskKey, timerId);
+    } catch (error) {
+      clearReportTaskPolling(taskKey);
+      onError(error);
+    }
+  };
+
+  poll();
+}
+
 async function rerunTaskRun(taskId) {
   return fetchJson(api.rerunTaskRun(taskId), {
     method: "POST",
@@ -876,7 +963,7 @@ function formatReportOptions(options) {
 }
 
 async function runWatchlistReport(options) {
-  return fetchJson(api.runReport, {
+  return fetchJson(api.runReportAsync, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -891,7 +978,7 @@ async function runWatchlistReport(options) {
 }
 
 async function runSingleFundReport(fundCode, options) {
-  return fetchJson(api.runReport, {
+  return fetchJson(api.runReportAsync, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -955,6 +1042,7 @@ async function handleFundLookupResultClick(event) {
   }
 
   actionButton.disabled = true;
+  let keepActionDisabled = false;
   try {
     if (action === "detail") {
       setFundLookupMessage(`正在打开 ${fundCode} 的基金详情...`);
@@ -966,17 +1054,40 @@ async function handleFundLookupResultClick(event) {
       setFundLookupMessage(data.message ?? "已加入自选基金。", "success");
     } else if (action === "run-report") {
       const options = getReportOptions();
-      setFundLookupMessage(`正在生成单只基金日报：${formatReportOptions(options)}...`);
+      setFundLookupMessage(`正在提交单只基金日报：${formatReportOptions(options)}...`);
       const data = await runSingleFundReport(fundCode, options);
-      const warnings = data.result?.warnings ?? [];
-      const warningText = warnings.length > 0 ? `，warning：${warnings.length}` : "";
-      setFundLookupMessage(`单只基金日报生成成功${warningText}。`, "success");
-      await loadDashboard();
+      const taskId = data.task_id;
+      if (!taskId) {
+        throw new Error("异步任务响应缺少 task_id。");
+      }
+      setFundLookupMessage(`任务 #${taskId} 已加入队列，等待 worker 处理。`);
+      keepActionDisabled = true;
+      startReportTaskPolling(taskId, {
+        onUpdate: ({ status, message }) => {
+          setFundLookupMessage(`任务 #${taskId} ${status}：${message}`);
+        },
+        onComplete: (taskData, status) => {
+          actionButton.disabled = false;
+          if (status === "success") {
+            setFundLookupMessage(`单只基金日报任务 #${taskId} 已完成。`, "success");
+          } else {
+            const errorMessage = taskData.task_run?.error ?? "报告生成失败。";
+            setFundLookupMessage(`任务 #${taskId} 失败：${errorMessage}`, "error");
+          }
+        },
+        onError: (error) => {
+          actionButton.disabled = false;
+          setFundLookupMessage(`任务 #${taskId} 状态查询失败：${error.message}`, "error");
+        },
+      });
+      return;
     }
   } catch (error) {
     setFundLookupMessage(error.message, "error");
   } finally {
-    actionButton.disabled = false;
+    if (!keepActionDisabled) {
+      actionButton.disabled = false;
+    }
   }
 }
 
@@ -1138,7 +1249,7 @@ async function handleTaskRunsClick(event) {
     if (action === "detail" && taskId && detailSlot) {
       detailSlot.innerHTML = '<p class="item-meta">正在加载任务详情...</p>';
       const data = await loadTaskRunDetail(taskId);
-      detailSlot.innerHTML = renderTaskRunDetail(data.task_run ?? {});
+      detailSlot.innerHTML = renderTaskRunDetail(data);
     } else if (action === "report" && reportId) {
       setReportActionMessage(`正在打开任务关联报告 #${reportId}...`);
       const data = await loadReportDetail(reportId);
@@ -1234,21 +1345,42 @@ async function handleRunWatchlistReport() {
   elements.refreshButton.disabled = true;
   elements.reportUseRealData.disabled = true;
   elements.reportUseLlm.disabled = true;
-  setReportActionMessage(`正在生成自选基金日报：${formatReportOptions(options)}...`);
+  setReportActionMessage(`正在提交自选基金日报：${formatReportOptions(options)}...`);
 
   try {
     const data = await runWatchlistReport(options);
-    const result = data.result ?? {};
-    const warnings = result.warnings ?? [];
-    const warningText = warnings.length > 0 ? `，warning：${warnings.length}` : "";
-    setReportActionMessage(
-      `日报生成成功：${formatReportOptions(options)}${warningText}。`,
-      "success",
-    );
-    await loadDashboard();
+    const taskId = data.task_id;
+    if (!taskId) {
+      throw new Error("异步任务响应缺少 task_id。");
+    }
+
+    setReportActionMessage(`任务 #${taskId} 已加入队列，等待 worker 处理。`);
+    startReportTaskPolling(taskId, {
+      onUpdate: ({ status, message }) => {
+        setReportActionMessage(`任务 #${taskId} ${status}：${message}`);
+      },
+      onComplete: (taskData, status) => {
+        elements.runWatchlistReportButton.disabled = false;
+        elements.refreshButton.disabled = false;
+        elements.reportUseRealData.disabled = false;
+        elements.reportUseLlm.disabled = false;
+        if (status === "success") {
+          setReportActionMessage(`自选基金日报任务 #${taskId} 已完成。`, "success");
+        } else {
+          const errorMessage = taskData.task_run?.error ?? "报告生成失败。";
+          setReportActionMessage(`任务 #${taskId} 失败：${errorMessage}`, "error");
+        }
+      },
+      onError: (error) => {
+        elements.runWatchlistReportButton.disabled = false;
+        elements.refreshButton.disabled = false;
+        elements.reportUseRealData.disabled = false;
+        elements.reportUseLlm.disabled = false;
+        setReportActionMessage(`任务 #${taskId} 状态查询失败：${error.message}`, "error");
+      },
+    });
   } catch (error) {
     setReportActionMessage(error.message, "error");
-  } finally {
     elements.runWatchlistReportButton.disabled = false;
     elements.refreshButton.disabled = false;
     elements.reportUseRealData.disabled = false;

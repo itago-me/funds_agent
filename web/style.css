@@ -835,6 +835,25 @@ h2 {
   line-height: 1.55;
 }
 
+.task-progress {
+  border-left: 3px solid var(--blue);
+}
+
+.task-progress.running,
+.task-progress.pending {
+  background: rgba(49, 92, 138, 0.08);
+}
+
+.task-progress.success {
+  border-left-color: var(--green);
+  background: rgba(31, 122, 77, 0.08);
+}
+
+.task-progress.failed {
+  border-left-color: var(--red);
+  background: rgba(180, 61, 47, 0.08);
+}
+
 .row {
   display: flex;
   align-items: center;

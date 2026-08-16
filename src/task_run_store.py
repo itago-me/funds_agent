@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from src.db import get_session_factory
 from src.models import Report, TaskRun
 from src.report_store import load_report_records
+from src.task_status import TASK_STATUS_PENDING, validate_task_status
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -308,6 +309,117 @@ def query_task_run_records(
         for task_run in task_runs
     ]
     return records, int(total)
+
+
+def create_pending_task_run(
+    *,
+    task_id: int | None = None,
+    run_options: dict[str, object] | None = None,
+    fund_codes: list[str] | None = None,
+    session_factory: SessionFactory | None = None,
+    task_log_path: Path = TASK_LOG_PATH,
+    report_index_path: Path = REPORT_INDEX_PATH,
+) -> dict[str, object]:
+    record: dict[str, object] = {
+        "started_at": datetime.now().isoformat(timespec="seconds"),
+        "status": TASK_STATUS_PENDING,
+        "fund_codes": fund_codes or [],
+        "warnings": [],
+        "warnings_count": 0,
+    }
+    if run_options is not None:
+        record["run_options"] = run_options
+
+    factory = session_factory or _default_session_factory()
+    with factory() as session:
+        task_run = _model_from_record(session, record)
+        if task_id is not None:
+            task_run.id = task_id
+        session.add(task_run)
+        session.commit()
+        session.refresh(task_run)
+        created_record = _record_from_model(task_run)
+
+    _append_jsonl_record(task_log_path, created_record)
+    return _enrich_task_record_with_report_lookup(
+        created_record,
+        session_factory=session_factory,
+        report_index_path=report_index_path,
+    )
+
+
+def update_task_run_status(
+    *,
+    task_id: int,
+    status_value: str,
+    finished_at: datetime | None = None,
+    data_source: str | None = None,
+    analysis_mode: str | None = None,
+    fund_codes: list[str] | None = None,
+    report_path: str | None = None,
+    warnings: list[str] | None = None,
+    error: str | None = None,
+    error_type: str | None = None,
+    session_factory: SessionFactory | None = None,
+    report_index_path: Path = REPORT_INDEX_PATH,
+) -> dict[str, object]:
+    normalized_status = validate_task_status(status_value)
+    factory = session_factory or _default_session_factory()
+
+    with factory() as session:
+        task_run = session.get(TaskRun, task_id)
+        if task_run is None:
+            raise LookupError(f"Task run record not found: {task_id}")
+
+        task_run.status = normalized_status
+        if finished_at is not None:
+            task_run.finished_at = finished_at
+        if data_source is not None:
+            task_run.data_source = data_source
+        if analysis_mode is not None:
+            task_run.analysis_mode = analysis_mode
+        if fund_codes is not None:
+            task_run.fund_codes = fund_codes
+        if report_path is not None:
+            task_run.report_path = report_path
+            task_run.report_id = _find_report_id_for_record(
+                session,
+                {"report_path": report_path},
+            )
+        if warnings is not None:
+            task_run.warnings = warnings
+            task_run.warnings_count = len(warnings)
+        if error is not None:
+            task_run.error = error
+        if error_type is not None:
+            task_run.error_type = error_type
+
+        session.commit()
+        session.refresh(task_run)
+        updated_record = _record_from_model(task_run)
+
+    return _enrich_task_record_with_report_lookup(
+        updated_record,
+        session_factory=session_factory,
+        report_index_path=report_index_path,
+    )
+
+
+def _enrich_task_record_with_report_lookup(
+    record: dict[str, object],
+    *,
+    session_factory: SessionFactory | None = None,
+    report_index_path: Path = REPORT_INDEX_PATH,
+) -> dict[str, object]:
+    report_lookup_by_id, report_lookup_by_path = _build_report_lookup(
+        report_index_path=report_index_path,
+        session_factory=session_factory,
+    )
+    return _enrich_report_link(
+        record,
+        report_lookup_by_id=report_lookup_by_id,
+        report_lookup_by_path=report_lookup_by_path,
+    )
 
 
 def append_task_run_record(

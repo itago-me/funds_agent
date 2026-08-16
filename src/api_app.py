@@ -20,6 +20,8 @@ from src.fund_snapshot_store import (
     load_snapshot_records,
 )
 from src.database_status import load_database_status
+from src.redis_client import check_redis_connection
+from src.report_queue import REPORT_QUEUE_KEY, enqueue_report_task
 import src.report_index as report_index
 from src.report_index import (
     build_report_summary,
@@ -30,9 +32,12 @@ from src.report_index import (
 )
 from src.task_logger import finish_task_failed, finish_task_success, start_task
 from src.task_run_store import (
+    create_pending_task_run,
     load_task_run_records as load_task_run_records_from_store,
     query_task_run_records,
+    update_task_run_status,
 )
+from src.task_status import read_task_progress
 from src.watchlist_loader import (
     WATCHLIST_PATH,
     add_watchlist_code,
@@ -97,6 +102,17 @@ def get_database_status() -> dict[str, object]:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database is unavailable.",
+        ) from exc
+
+
+@app.get("/redis/status")
+def get_redis_status() -> dict[str, object]:
+    try:
+        return check_redis_connection()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Redis is unavailable.",
         ) from exc
 
 
@@ -485,6 +501,59 @@ def run_report(request: ReportRunRequest) -> dict[str, object]:
     }
 
 
+@app.post("/reports/run-async", status_code=status.HTTP_202_ACCEPTED)
+def enqueue_report_run(request: ReportRunRequest) -> dict[str, object]:
+    if request.codes is None and request.use_watchlist:
+        fund_codes = load_watchlist_codes()
+        if not fund_codes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Watchlist is empty. Add at least one fund code before queuing a watchlist report.",
+            )
+    else:
+        fund_codes = [str(code) for code in (request.codes or [])]
+
+    run_options = build_report_run_options(request)
+    pending_task = create_pending_task_run(
+        run_options=run_options,
+        fund_codes=fund_codes,
+    )
+    task_id = int(pending_task["task_id"])
+    payload = {
+        "task_id": task_id,
+        "codes": fund_codes or request.codes,
+        "fund_codes": fund_codes,
+        "use_watchlist": request.use_watchlist,
+        "use_real_data": request.use_real_data,
+        "use_llm": request.use_llm,
+    }
+
+    try:
+        queue_size = enqueue_report_task(payload)
+    except Exception as exc:
+        try:
+            update_task_run_status(
+                task_id=task_id,
+                status_value="failed",
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Report task queue is unavailable.",
+        ) from exc
+
+    return {
+        "status": "pending",
+        "message": "Report task queued.",
+        "task_id": task_id,
+        "queue": REPORT_QUEUE_KEY,
+        "queue_size": queue_size,
+    }
+
+
 @app.get("/task-runs")
 def list_task_runs(
     status_value: Annotated[str | None, Query(alias="status")] = None,
@@ -544,7 +613,19 @@ def get_task_run_detail(task_id: int) -> dict[str, object]:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task run record not found: {task_id}",
         )
-    return {"task_run": task_run}
+
+    progress: dict[str, object] | None = None
+    progress_available = True
+    try:
+        progress = read_task_progress(task_id=task_id)
+    except Exception:
+        progress_available = False
+
+    return {
+        "task_run": task_run,
+        "progress": progress,
+        "progress_available": progress_available,
+    }
 
 
 @app.post("/task-runs/{task_id}/rerun", status_code=status.HTTP_201_CREATED)
