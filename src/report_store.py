@@ -11,6 +11,7 @@ from typing import Any, Callable
 from sqlalchemy import func, select
 
 from src.db import get_session_factory
+from src.report_paths import normalize_report_path_for_storage
 from src.models import Report, ReportFund
 from src.watchlist_common import normalize_fund_code, normalize_fund_codes
 
@@ -81,7 +82,7 @@ def _record_from_model(report: Report) -> dict[str, object]:
         "report_id": report.id,
         "created_at": _format_datetime(report.created_at),
         "report_date": _format_date(report.report_date),
-        "report_path": report.report_path,
+        "report_path": normalize_report_path_for_storage(report.report_path),
         "data_source": report.data_source,
         "analysis_mode": report.analysis_mode,
         "fund_codes": _normalize_list(report.fund_codes),
@@ -95,7 +96,9 @@ def _model_from_record(record: dict[str, object]) -> Report:
     report = Report(
         created_at=_parse_datetime(record.get("created_at")),
         report_date=_parse_date(record.get("report_date")),
-        report_path=str(record.get("report_path") or ""),
+        report_path=normalize_report_path_for_storage(
+            str(record.get("report_path") or "")
+        ),
         data_source=str(record.get("data_source") or ""),
         analysis_mode=str(record.get("analysis_mode") or ""),
         fund_codes=fund_codes,
@@ -219,7 +222,7 @@ def append_report_record(
     record = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "report_date": report_date,
-        "report_path": str(report_path),
+        "report_path": normalize_report_path_for_storage(report_path),
         "data_source": data_source,
         "analysis_mode": analysis_mode,
         "fund_codes": fund_codes or [],

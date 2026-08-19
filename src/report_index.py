@@ -6,6 +6,10 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from src.report_paths import (
+    normalize_report_path_for_storage,
+    resolve_report_path as resolve_report_path_impl,
+)
 from src.report_store import (
     append_report_record,
     load_report_records as load_report_records_from_store,
@@ -79,7 +83,10 @@ def load_report_record_by_id(report_id: int) -> dict[str, object] | None:
 def build_report_summary(record: dict[str, object]) -> dict[str, object]:
     fund_codes = normalize_list(record.get("fund_codes"))
     warnings = normalize_list(record.get("warnings"))
-    report_path = Path(str(record.get("report_path", "")))
+    stored_report_path = normalize_report_path_for_storage(
+        str(record.get("report_path", ""))
+    )
+    report_path = resolve_report_path_impl(stored_report_path)
 
     return {
         "report_id": record.get("report_id"),
@@ -91,7 +98,7 @@ def build_report_summary(record: dict[str, object]) -> dict[str, object]:
         "fund_count": len(fund_codes),
         "warnings_count": len(warnings),
         "warnings": warnings,
-        "report_path": str(report_path),
+        "report_path": stored_report_path,
         "report_file_name": report_path.name,
         "report_exists": report_path.exists(),
     }
@@ -103,7 +110,9 @@ def build_report_detail(record: dict[str, object]) -> dict[str, object]:
     if not isinstance(history_comparison, dict):
         history_comparison = {}
 
-    report_path = Path(str(record.get("report_path", "")))
+    report_path = resolve_report_path_impl(
+        normalize_report_path_for_storage(str(record.get("report_path", "")))
+    )
     if not report_path.exists():
         raise FileNotFoundError(str(report_path))
 
@@ -114,6 +123,10 @@ def build_report_detail(record: dict[str, object]) -> dict[str, object]:
         },
         "content": report_path.read_text(encoding="utf-8"),
     }
+
+
+def resolve_report_path(report_path: str) -> Path:
+    return resolve_report_path_impl(report_path)
 
 
 def normalize_list(value: object) -> list[object]:
@@ -171,7 +184,9 @@ def build_history_comparison(
     return {
         "has_previous_report": True,
         "previous_report_date": previous_record.get("report_date", "unknown"),
-        "previous_report_path": previous_record.get("report_path", "unknown"),
+        "previous_report_path": normalize_report_path_for_storage(
+            str(previous_record.get("report_path", "unknown"))
+        ),
         "summary": " ".join(changes),
     }
 

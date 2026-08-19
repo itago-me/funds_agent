@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from urllib.parse import quote
 
+from src.report_paths import normalize_report_path_for_storage
 from src.report_store import load_report_records
 from src.task_run_store import load_task_run_records
 
@@ -43,12 +44,12 @@ def _build_report_url(dashboard_url: str, report_id: object | None) -> str:
 
 
 def _find_report_for_task(task: dict[str, object]) -> dict[str, object] | None:
-    report_path = str(task.get("report_path") or "")
+    report_path = normalize_report_path_for_storage(str(task.get("report_path") or ""))
     if not report_path:
         return None
 
     for record in reversed(_load_report_records()):
-        if str(record.get("report_path") or "") == report_path:
+        if normalize_report_path_for_storage(str(record.get("report_path") or "")) == report_path:
             return record
     return None
 

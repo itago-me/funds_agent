@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 
+from src.report_paths import normalize_report_path_for_storage
 from src.task_run_store import append_task_run_record
 
 
@@ -41,7 +42,7 @@ def finish_task_success(
         "data_source": data_source,
         "analysis_mode": analysis_mode,
         "fund_codes": fund_codes or [],
-        "report_path": str(report_path),
+        "report_path": normalize_report_path_for_storage(report_path),
         "warnings": warnings,
         "warnings_count": len(warnings),
     }

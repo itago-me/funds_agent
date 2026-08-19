@@ -13,6 +13,10 @@ from sqlalchemy import func, select
 
 from src.db import get_session_factory
 from src.models import Report, TaskRun
+from src.report_paths import (
+    normalize_report_path_for_storage,
+    resolve_report_path,
+)
 from src.report_store import load_report_records
 from src.task_status import TASK_STATUS_PENDING, validate_task_status
 
@@ -84,14 +88,16 @@ def _build_report_lookup(
         if isinstance(report_id, int):
             summary = _build_report_link_summary(record)
             by_id[report_id] = summary
-            report_path = str(record.get("report_path") or "")
+            report_path = normalize_report_path_for_storage(
+                str(record.get("report_path") or "")
+            )
             if report_path:
                 by_path[report_path] = summary
     return by_id, by_path
 
 
 def _build_report_link_summary(record: dict[str, object]) -> dict[str, object]:
-    report_path = Path(str(record.get("report_path") or ""))
+    report_path = resolve_report_path(str(record.get("report_path") or ""))
     return {
         "report_id": record.get("report_id"),
         "report_date": record.get("report_date"),
@@ -108,14 +114,17 @@ def _enrich_report_link(
 ) -> dict[str, object]:
     task_run = dict(record)
     report_id = task_run.get("report_id")
-    report_path = str(task_run.get("report_path") or "")
+    report_path = normalize_report_path_for_storage(
+        str(task_run.get("report_path") or "")
+    )
     if isinstance(report_id, int) and report_id in report_lookup_by_id:
         task_run.update(report_lookup_by_id[report_id])
     elif report_path in report_lookup_by_path:
         task_run.update(report_lookup_by_path[report_path])
     elif report_path:
-        task_run["report_file_name"] = Path(report_path).name
-        task_run["report_exists"] = Path(report_path).exists()
+        resolved_report_path = resolve_report_path(report_path)
+        task_run["report_file_name"] = resolved_report_path.name
+        task_run["report_exists"] = resolved_report_path.exists()
     return task_run
 
 
@@ -132,7 +141,7 @@ def _record_from_model(task_run: TaskRun) -> dict[str, object]:
         "data_source": task_run.data_source,
         "analysis_mode": task_run.analysis_mode,
         "fund_codes": _normalize_list(task_run.fund_codes),
-        "report_path": task_run.report_path,
+        "report_path": normalize_report_path_for_storage(task_run.report_path or ""),
         "warnings": _normalize_list(task_run.warnings),
         "warnings_count": task_run.warnings_count,
         "run_options": _normalize_dict(task_run.run_options),
@@ -147,7 +156,9 @@ def _find_report_id_for_record(session: object, record: dict[str, object]) -> in
     if isinstance(report_id, int):
         return report_id
 
-    report_path = str(record.get("report_path") or "")
+    report_path = normalize_report_path_for_storage(
+        str(record.get("report_path") or "")
+    )
     if not report_path:
         return None
 
@@ -170,7 +181,11 @@ def _model_from_record(session: object, record: dict[str, object]) -> TaskRun:
         data_source=str(record.get("data_source")) if record.get("data_source") is not None else None,
         analysis_mode=str(record.get("analysis_mode")) if record.get("analysis_mode") is not None else None,
         fund_codes=_normalize_list(record.get("fund_codes")),
-        report_path=str(record.get("report_path")) if record.get("report_path") is not None else None,
+        report_path=normalize_report_path_for_storage(
+            str(record.get("report_path") or "")
+        )
+        if record.get("report_path") is not None
+        else None,
         warnings=warnings,
         warnings_count=int(record.get("warnings_count") or len(warnings)),
         run_options=_normalize_dict(record.get("run_options")),
@@ -381,10 +396,11 @@ def update_task_run_status(
         if fund_codes is not None:
             task_run.fund_codes = fund_codes
         if report_path is not None:
-            task_run.report_path = report_path
+            normalized_report_path = normalize_report_path_for_storage(report_path)
+            task_run.report_path = normalized_report_path
             task_run.report_id = _find_report_id_for_record(
                 session,
-                {"report_path": report_path},
+                {"report_path": normalized_report_path},
             )
         if warnings is not None:
             task_run.warnings = warnings
@@ -429,12 +445,18 @@ def append_task_run_record(
     task_log_path: Path = TASK_LOG_PATH,
     report_index_path: Path = REPORT_INDEX_PATH,
 ) -> None:
+    stored_record = dict(record)
+    if "report_path" in stored_record:
+        stored_record["report_path"] = normalize_report_path_for_storage(
+            str(stored_record.get("report_path") or "")
+        )
+
     factory = session_factory or _default_session_factory()
     try:
         with factory() as session:
-            session.add(_model_from_record(session, record))
+            session.add(_model_from_record(session, stored_record))
             session.commit()
     except Exception:
         pass
 
-    _append_jsonl_record(task_log_path, record)
+    _append_jsonl_record(task_log_path, stored_record)

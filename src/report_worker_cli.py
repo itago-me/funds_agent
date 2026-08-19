@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from typing import Any, Callable
 
 from src.report_worker import process_next_report_task, run_report_worker
@@ -12,6 +13,10 @@ WorkerRunner = Callable[..., None]
 ProcessRunner = Callable[..., dict[str, object] | None]
 
 
+def _default_poll_interval() -> float:
+    return float(os.getenv("REPORT_WORKER_POLL_INTERVAL", "1.0"))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run the Funds Agent Redis report worker.",
@@ -19,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--poll-interval",
         type=float,
-        default=1.0,
+        default=_default_poll_interval(),
         help="Seconds to wait before checking the Redis queue again.",
     )
     parser.add_argument(
