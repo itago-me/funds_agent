@@ -1,0 +1,114 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: funds-agent-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change_me_root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-funds_agent}
+      MYSQL_USER: ${MYSQL_USER:-funds_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-change_me}
+      MYSQL_CHARSET: ${MYSQL_CHARSET:-utf8mb4}
+    command:
+      [
+        "--character-set-server=${MYSQL_CHARSET:-utf8mb4}",
+        "--collation-server=utf8mb4_unicode_ci",
+      ]
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - funds_agent_mysql_data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: redis:7.2
+    container_name: funds-agent-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - funds_agent_redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: funds-agent-api
+    restart: unless-stopped
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-funds_agent}
+      MYSQL_USER: ${MYSQL_USER:-funds_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-change_me}
+      MYSQL_CHARSET: ${MYSQL_CHARSET:-utf8mb4}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DATABASE: ${REDIS_DATABASE:-0}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+    command:
+      ["uvicorn", "src.api_app:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+      - ./watchlist.json:/app/watchlist.json
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: funds-agent-worker
+    restart: unless-stopped
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-funds_agent}
+      MYSQL_USER: ${MYSQL_USER:-funds_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-change_me}
+      MYSQL_CHARSET: ${MYSQL_CHARSET:-utf8mb4}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DATABASE: ${REDIS_DATABASE:-0}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      REPORT_WORKER_POLL_INTERVAL: ${REPORT_WORKER_POLL_INTERVAL:-1.0}
+    command: ["python", "-m", "src.report_worker_cli"]
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+      - ./watchlist.json:/app/watchlist.json
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  funds_agent_mysql_data:
+  funds_agent_redis_data:
