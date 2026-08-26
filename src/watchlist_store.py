@@ -49,14 +49,18 @@ def _write_codes_to_file(path: Path, fund_codes: Iterable[str]) -> list[str]:
 
 def load_watchlist_codes(
     *,
+    user_id: int | None = None,
     session_factory: SessionFactory | None = None,
     watchlist_path: Path = WATCHLIST_PATH,
 ) -> list[str]:
     factory = session_factory or _default_session_factory()
     with factory() as session:
         try:
+            query = select(WatchlistItem.fund_code).order_by(WatchlistItem.id.asc())
+            if user_id is not None:
+                query = query.where(WatchlistItem.user_id == user_id)
             result = session.execute(
-                select(WatchlistItem.fund_code).order_by(WatchlistItem.id.asc())
+                query
             ).scalars().all()
         except Exception:
             result = []
@@ -64,10 +68,15 @@ def load_watchlist_codes(
         if result:
             return normalize_fund_codes(list(result))
 
+        # A user-scoped request must never inherit the legacy global JSON file.
+        # The file fallback is retained only for old CLI and migration callers.
+        if user_id is not None:
+            return []
+
         file_codes = _load_codes_from_file(watchlist_path)
         if file_codes:
             for fund_code in file_codes:
-                session.add(WatchlistItem(fund_code=fund_code))
+                session.add(WatchlistItem(user_id=None, fund_code=fund_code))
             session.commit()
             return file_codes
 
@@ -77,29 +86,36 @@ def load_watchlist_codes(
 def save_watchlist_codes(
     fund_codes: list[object],
     *,
+    user_id: int | None = None,
     session_factory: SessionFactory | None = None,
     watchlist_path: Path = WATCHLIST_PATH,
 ) -> list[str]:
     normalized_codes = normalize_fund_codes(fund_codes)
     factory = session_factory or _default_session_factory()
     with factory() as session:
-        session.execute(delete(WatchlistItem))
+        delete_query = delete(WatchlistItem)
+        if user_id is not None:
+            delete_query = delete_query.where(WatchlistItem.user_id == user_id)
+        session.execute(delete_query)
         for fund_code in normalized_codes:
-            session.add(WatchlistItem(fund_code=fund_code))
+            session.add(WatchlistItem(user_id=user_id, fund_code=fund_code))
         session.commit()
 
-    _write_codes_to_file(watchlist_path, normalized_codes)
+    if user_id is None:
+        _write_codes_to_file(watchlist_path, normalized_codes)
     return normalized_codes
 
 
 def add_watchlist_code(
     fund_code: object,
     *,
+    user_id: int | None = None,
     session_factory: SessionFactory | None = None,
     watchlist_path: Path = WATCHLIST_PATH,
 ) -> tuple[list[str], bool]:
     normalized = normalize_fund_code(fund_code)
     fund_codes = load_watchlist_codes(
+        user_id=user_id,
         session_factory=session_factory,
         watchlist_path=watchlist_path,
     )
@@ -109,6 +125,7 @@ def add_watchlist_code(
     fund_codes.append(normalized)
     return save_watchlist_codes(
         fund_codes,
+        user_id=user_id,
         session_factory=session_factory,
         watchlist_path=watchlist_path,
     ), True
@@ -117,11 +134,13 @@ def add_watchlist_code(
 def remove_watchlist_code(
     fund_code: object,
     *,
+    user_id: int | None = None,
     session_factory: SessionFactory | None = None,
     watchlist_path: Path = WATCHLIST_PATH,
 ) -> tuple[list[str], bool]:
     normalized = normalize_fund_code(fund_code)
     fund_codes = load_watchlist_codes(
+        user_id=user_id,
         session_factory=session_factory,
         watchlist_path=watchlist_path,
     )
@@ -130,6 +149,7 @@ def remove_watchlist_code(
     if removed:
         save_watchlist_codes(
             updated_codes,
+            user_id=user_id,
             session_factory=session_factory,
             watchlist_path=watchlist_path,
         )

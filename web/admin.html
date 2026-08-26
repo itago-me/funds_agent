@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Funds Agent Admin</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body class="admin-page">
+    <main class="page-shell admin-shell">
+      <header class="topbar">
+        <a class="brand-mark" href="/">
+          <span class="brand-mark-icon">F</span>
+          <span>
+            <strong>Funds Agent</strong>
+            <small>管理员工作台</small>
+          </span>
+        </a>
+        <div class="auth-status">
+          <span id="admin-user-name" class="auth-user-name">检查登录状态...</span>
+          <a class="auth-login-link" href="/">返回 dashboard</a>
+          <button id="admin-logout-button" class="auth-logout-button" type="button">
+            退出登录
+          </button>
+        </div>
+      </header>
+
+      <section class="admin-hero panel">
+        <div>
+          <p class="eyebrow">Administrator</p>
+          <h1>用户与安全管理</h1>
+          <p class="admin-page-intro">
+            管理用户角色、启用状态和登录密码。基金查询与报告生成请返回业务工作台操作。
+          </p>
+        </div>
+        <div class="status-card">
+          <span class="status-dot ok"></span>
+          <div>
+            <p class="muted">访问范围</p>
+            <strong>管理员</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel admin-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">User Management</p>
+            <h2>系统用户</h2>
+          </div>
+          <button id="admin-users-refresh-button" type="button">刷新用户</button>
+        </div>
+        <div id="admin-user-message" class="form-message" role="status" aria-live="polite"></div>
+        <div id="admin-users" class="admin-users loading">加载用户列表...</div>
+      </section>
+    </main>
+
+    <script src="/admin.js"></script>
+  </body>
+</html>

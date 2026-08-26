@@ -62,6 +62,7 @@ def run_daily_report(
     use_llm: bool = False,
     use_real_data: bool = False,
     use_watchlist: bool = False,
+    user_id: int | None = None,
 ) -> dict[str, object]:
     from dotenv import load_dotenv
 
@@ -69,7 +70,7 @@ def run_daily_report(
     report_date = date.today()
     selected_codes = codes
     if selected_codes is None and use_watchlist:
-        selected_codes = load_watchlist_codes()
+        selected_codes = load_watchlist_codes(user_id=user_id)
     funds, data_source, warnings = load_funds(
         selected_codes=selected_codes,
         prefer_real_data=use_real_data,
@@ -153,6 +154,7 @@ def run_daily_report(
         fund_codes=selected_codes,
         warnings=warnings,
         history_comparison=history_comparison,
+        user_id=user_id,
     )
     print("今日基金分析报道:")
     print(report)
@@ -177,7 +179,8 @@ def main() -> None:
             "use_watchlist": args.use_watchlist,
             "use_real_data": args.use_real_data,
             "use_llm": args.use_llm,
-        }
+        },
+        user_id=None,
     )
     try:
         result = run_daily_report(

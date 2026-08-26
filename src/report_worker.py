@@ -58,11 +58,16 @@ def process_next_report_task(
         sleep(sleep_seconds)
 
     try:
+        runner_kwargs: dict[str, object] = {
+            "codes": payload.get("codes"),
+            "use_llm": bool(payload.get("use_llm", False)),
+            "use_real_data": bool(payload.get("use_real_data", True)),
+            "use_watchlist": bool(payload.get("use_watchlist", False)),
+        }
+        if payload.get("user_id") is not None:
+            runner_kwargs["user_id"] = int(payload["user_id"])
         result = runner(
-            codes=payload.get("codes"),
-            use_llm=bool(payload.get("use_llm", False)),
-            use_real_data=bool(payload.get("use_real_data", True)),
-            use_watchlist=bool(payload.get("use_watchlist", False)),
+            **runner_kwargs,
         )
     except Exception as exc:
         failure = _mark_task_failed(

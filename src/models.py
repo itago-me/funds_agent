@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for the stage 6 database migration."""
+"""SQLAlchemy ORM models for the Funds Agent database."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     JSON,
     Date,
     DateTime,
@@ -17,28 +18,82 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db import Base
+from src.authorization import ROLE_USER
 
 
 class WatchlistItem(Base):
     __tablename__ = "watchlist_items"
+    __table_args__ = (
+        UniqueConstraint("user_id", "fund_code", name="uq_watchlist_items_user_fund"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    fund_code: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    fund_code: Mapped[str] = mapped_column(String(20), index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         server_default=func.now(),
     )
 
+    user: Mapped["User | None"] = relationship(back_populates="watchlist_items")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(
+        String(100),
+        unique=True,
+        index=True,
+        nullable=False,
+    )
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=ROLE_USER,
+        server_default=ROLE_USER,
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=true(),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    watchlist_items: Mapped[list[WatchlistItem]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    reports: Mapped[list["Report"]] = relationship(back_populates="user")
+    task_runs: Mapped[list["TaskRun"]] = relationship(back_populates="user")
+
 
 class Report(Base):
     __tablename__ = "reports"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
@@ -60,6 +115,7 @@ class Report(Base):
         back_populates="report",
         cascade="all, delete-orphan",
     )
+    user: Mapped["User | None"] = relationship(back_populates="reports")
 
 
 class ReportFund(Base):
@@ -83,6 +139,11 @@ class TaskRun(Base):
     __tablename__ = "task_runs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     report_id: Mapped[int | None] = mapped_column(
         ForeignKey("reports.id", ondelete="SET NULL"),
         nullable=True,
@@ -108,6 +169,7 @@ class TaskRun(Base):
     report: Mapped[Report | None] = relationship(
         back_populates="task_runs",
     )
+    user: Mapped["User | None"] = relationship(back_populates="task_runs")
 
 
 class FundSnapshot(Base):

@@ -79,6 +79,87 @@ input[type="checkbox"] {
   padding: 2rem 0 3rem;
 }
 
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.brand-mark,
+.login-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.brand-mark > span:last-child,
+.login-brand > span:last-child {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.brand-mark strong,
+.login-brand strong {
+  font-size: 0.96rem;
+}
+
+.brand-mark small,
+.login-brand small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.brand-mark-icon {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 10px;
+  color: #fffaf0;
+  font-weight: 800;
+  background: var(--green);
+  box-shadow: 0 8px 20px rgba(31, 122, 77, 0.22);
+}
+
+.auth-status {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 2.4rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.25rem 0.35rem 0.25rem 0.85rem;
+  background: rgba(255, 252, 245, 0.78);
+}
+
+.auth-user-name {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.auth-login-link,
+.auth-logout-button {
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  text-decoration: none;
+}
+
+.auth-login-link {
+  color: #fffaf0;
+  background: var(--green);
+}
+
+.auth-logout-button {
+  box-shadow: none;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.78rem;
+}
+
 .panel,
 .metric-card {
   border: 1px solid var(--line);
@@ -86,6 +167,10 @@ input[type="checkbox"] {
   background: var(--panel);
   box-shadow: var(--shadow);
   backdrop-filter: blur(18px);
+}
+
+.hidden {
+  display: none !important;
 }
 
 .hero {
@@ -296,6 +381,140 @@ h2 {
   grid-template-columns: minmax(0, 1.6fr) minmax(330px, 0.8fr);
   gap: 1rem;
   align-items: start;
+}
+
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 1.5rem;
+  background:
+    radial-gradient(circle at 15% 10%, rgba(49, 92, 138, 0.13), transparent 28rem),
+    linear-gradient(135deg, #f8f2e8 0%, var(--bg) 65%, #e8dfd1 100%);
+}
+
+.login-shell {
+  display: grid;
+  width: min(100%, 430px);
+  gap: 1.1rem;
+}
+
+.login-brand {
+  justify-self: center;
+}
+
+.login-card {
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: clamp(1.4rem, 5vw, 2rem);
+  background: rgba(255, 252, 245, 0.92);
+  box-shadow: var(--shadow);
+}
+
+.login-heading {
+  margin-bottom: 1.5rem;
+}
+
+.login-heading h1 {
+  max-width: none;
+  margin-bottom: 0.65rem;
+  font-size: clamp(2rem, 7vw, 3rem);
+  letter-spacing: -0.05em;
+}
+
+.login-heading p:last-child {
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.65;
+}
+
+.login-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.login-form label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.login-form label span {
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.login-form button {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.login-footer {
+  margin: 1.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.admin-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 2rem;
+  min-height: 220px;
+  margin-bottom: 1rem;
+  padding: 2rem;
+}
+
+.admin-page-intro {
+  max-width: 44rem;
+  margin-bottom: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.admin-panel {
+  padding: 1.3rem;
+}
+
+.admin-users {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.admin-user-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1.4fr) minmax(6rem, 0.7fr) auto auto minmax(10rem, 1fr) auto;
+  align-items: end;
+  gap: 0.7rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.8rem;
+}
+
+.admin-user-identity,
+.admin-user-field,
+.admin-password-field {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.admin-user-field span,
+.admin-password-field span {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.admin-user-row input[type="password"],
+.admin-user-row select {
+  min-width: 0;
+  width: 100%;
+}
+
+.admin-active-toggle {
+  white-space: nowrap;
 }
 
 .report-panel,
@@ -941,7 +1160,22 @@ h2 {
     padding-top: 0.5rem;
   }
 
+  .topbar {
+    align-items: flex-start;
+  }
+
+  .auth-status {
+    max-width: 48%;
+  }
+
+  .auth-user-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .hero,
+  .admin-hero,
   .report-panel,
   .side-column .panel {
     border-radius: 22px;
@@ -958,6 +1192,16 @@ h2 {
 
   .report-meta-grid {
     grid-template-columns: 1fr;
+  }
+
+  .admin-user-row {
+    grid-template-columns: 1fr 1fr;
+    align-items: stretch;
+  }
+
+  .admin-user-identity,
+  .admin-password-field {
+    grid-column: 1 / -1;
   }
 
   .snapshot-row {

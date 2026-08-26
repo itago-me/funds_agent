@@ -21,8 +21,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 REPORT_INDEX_PATH = BASE_DIR / "reports" / "index.jsonl"
 
 
-def load_report_records() -> list[dict[str, object]]:
-    return load_report_records_from_store(report_index_path=REPORT_INDEX_PATH)
+def load_report_records(user_id: int | None = None) -> list[dict[str, object]]:
+    return load_report_records_from_store(
+        user_id=user_id,
+        report_index_path=REPORT_INDEX_PATH,
+    )
 
 
 def load_report_summaries(
@@ -34,6 +37,7 @@ def load_report_summaries(
     data_source: str | None = None,
     analysis_mode: str | None = None,
     fund_code: str | None = None,
+    user_id: int | None = None,
     session_factory: Any | None = None,
 ) -> dict[str, object]:
     normalized_limit = max(1, min(limit, 100))
@@ -44,6 +48,7 @@ def load_report_summaries(
         data_source=data_source,
         analysis_mode=analysis_mode,
         fund_code=fund_code,
+        user_id=user_id,
         limit=normalized_limit,
         offset=normalized_offset,
         session_factory=session_factory,
@@ -59,22 +64,22 @@ def load_report_summaries(
     }
 
 
-def load_report_detail(report_id: int) -> dict[str, object] | None:
-    record = load_report_record_by_id(report_id=report_id)
+def load_report_detail(report_id: int, *, user_id: int | None = None) -> dict[str, object] | None:
+    record = load_report_record_by_id(report_id=report_id, user_id=user_id)
     if record is None:
         return None
     return build_report_detail(record)
 
 
-def load_latest_report_detail() -> dict[str, object] | None:
-    record = load_latest_report_record()
+def load_latest_report_detail(*, user_id: int | None = None) -> dict[str, object] | None:
+    record = load_latest_report_record(user_id=user_id)
     if record is None:
         return None
     return build_report_detail(record)
 
 
-def load_report_record_by_id(report_id: int) -> dict[str, object] | None:
-    for record in load_report_records():
+def load_report_record_by_id(report_id: int, *, user_id: int | None = None) -> dict[str, object] | None:
+    for record in load_report_records(user_id=user_id):
         if record.get("report_id") == report_id:
             return record
     return None
@@ -135,8 +140,8 @@ def normalize_list(value: object) -> list[object]:
     return []
 
 
-def load_latest_report_record() -> dict[str, object] | None:
-    records = load_report_records()
+def load_latest_report_record(*, user_id: int | None = None) -> dict[str, object] | None:
+    records = load_report_records(user_id=user_id)
     if not records:
         return None
     return records[-1]
@@ -199,6 +204,7 @@ def append_report_index(
     fund_codes: list[str] | None,
     warnings: list[str],
     history_comparison: dict[str, object] | None = None,
+    user_id: int | None = None,
 ) -> None:
     append_report_record(
         report_path=report_path,
@@ -208,5 +214,6 @@ def append_report_index(
         fund_codes=fund_codes,
         warnings=warnings,
         history_comparison=history_comparison,
+        user_id=user_id,
         report_index_path=REPORT_INDEX_PATH,
     )

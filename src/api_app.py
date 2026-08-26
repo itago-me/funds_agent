@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from datetime import date
+import os
 from threading import Lock
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
@@ -20,6 +23,20 @@ from src.fund_snapshot_store import (
     load_snapshot_records,
 )
 from src.database_status import load_database_status
+from src.auth_service import (
+    authenticate_user,
+    load_current_user,
+    public_user_payload,
+    require_admin_user,
+    require_authenticated_user,
+)
+from src.auth_session import (
+    SESSION_COOKIE_NAME,
+    create_session,
+    delete_session,
+)
+from src.authorization import ROLE_ADMIN
+from src.models import User
 from src.redis_client import check_redis_connection
 from src.report_queue import REPORT_QUEUE_KEY, enqueue_report_task
 import src.report_index as report_index
@@ -38,6 +55,14 @@ from src.task_run_store import (
     update_task_run_status,
 )
 from src.task_status import read_task_progress
+from src.user_admin_service import (
+    LastAdminProtectionError,
+    SelfModificationError,
+    UserNotFoundError,
+    list_users,
+    reset_user_password,
+    update_user,
+)
 from src.watchlist_loader import (
     WATCHLIST_PATH,
     add_watchlist_code,
@@ -53,6 +78,22 @@ TASK_LOG_PATH = BASE_DIR / "logs" / "task_runs.jsonl"
 SNAPSHOT_PATH = BASE_DIR / "data" / "fund_snapshots.jsonl"
 WEB_DIR = BASE_DIR / "web"
 REPORT_RUN_LOCK = Lock()
+
+
+def _user_id_or_none(current_user: User | None) -> int | None:
+    return current_user.id if isinstance(current_user, User) else None
+
+
+def _user_kwargs(current_user: User | None) -> dict[str, int]:
+    user_id = _user_id_or_none(current_user)
+    return {"user_id": user_id} if user_id is not None else {}
+
+
+def _load_user_watchlist(current_user: User | None) -> list[str]:
+    user_id = _user_id_or_none(current_user)
+    if user_id is None:
+        return load_watchlist_codes()
+    return load_watchlist_codes(user_id=user_id)
 
 
 class ReportRunRequest(BaseModel):
@@ -82,6 +123,20 @@ class WatchlistFundRequest(BaseModel):
     fund_code: str = Field(description="Fund code to add to watchlist.json.")
 
 
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
+class AdminUserUpdateRequest(BaseModel):
+    role: str | None = None
+    is_active: bool | None = None
+
+
+class AdminUserPasswordResetRequest(BaseModel):
+    password: str = Field(min_length=8)
+
+
 app = FastAPI(
     title="Funds Agent API",
     version="0.1.0",
@@ -95,7 +150,9 @@ def health() -> dict[str, str]:
 
 
 @app.get("/database/status")
-def get_database_status() -> dict[str, object]:
+def get_database_status(
+    _current_user: User = Depends(require_admin_user),
+) -> dict[str, object]:
     try:
         return load_database_status()
     except Exception as exc:
@@ -106,7 +163,9 @@ def get_database_status() -> dict[str, object]:
 
 
 @app.get("/redis/status")
-def get_redis_status() -> dict[str, object]:
+def get_redis_status(
+    _current_user: User = Depends(require_admin_user),
+) -> dict[str, object]:
     try:
         return check_redis_connection()
     except Exception as exc:
@@ -114,6 +173,157 @@ def get_redis_status() -> dict[str, object]:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Redis is unavailable.",
         ) from exc
+
+
+def _auth_cookie_secure() -> bool:
+    return os.environ.get("AUTH_COOKIE_SECURE", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+@app.post("/auth/login")
+def login(request: LoginRequest, response: Response) -> dict[str, object]:
+    user = authenticate_user(request.username, request.password)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password.",
+        )
+
+    session_id = create_session(user_id=user.id)
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=session_id,
+        httponly=True,
+        secure=_auth_cookie_secure(),
+        samesite="lax",
+    )
+    return {
+        "status": "success",
+        "message": "Login successful.",
+        "user": public_user_payload(user),
+    }
+
+
+@app.post("/auth/logout")
+def logout(request: Request, response: Response) -> dict[str, str]:
+    delete_session(request.cookies.get(SESSION_COOKIE_NAME))
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        secure=_auth_cookie_secure(),
+        httponly=True,
+        samesite="lax",
+    )
+    return {"status": "success", "message": "Logout successful."}
+
+
+@app.get("/auth/me")
+def get_current_user(request: Request) -> dict[str, object]:
+    user = load_current_user(request.cookies.get(SESSION_COOKIE_NAME))
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required.",
+        )
+    return {"user": public_user_payload(user)}
+
+
+@app.get("/admin/users")
+def list_admin_users(
+    _current_user: User = Depends(require_admin_user),
+) -> dict[str, object]:
+    try:
+        users = list_users()
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is unavailable.",
+        ) from exc
+
+    return {
+        "count": len(users),
+        "users": users,
+    }
+
+
+@app.patch("/admin/users/{user_id}")
+def update_admin_user(
+    user_id: int,
+    request: AdminUserUpdateRequest,
+    current_admin: User = Depends(require_admin_user),
+) -> dict[str, object]:
+    try:
+        user = update_user(
+            user_id=user_id,
+            current_admin_id=current_admin.id,
+            role=request.role,
+            is_active=request.is_active,
+        )
+    except UserNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except SelfModificationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except LastAdminProtectionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is unavailable.",
+        ) from exc
+
+    return {
+        "status": "success",
+        "message": "User updated.",
+        "user": public_user_payload(user),
+    }
+
+
+@app.post("/admin/users/{user_id}/password")
+def reset_admin_user_password(
+    user_id: int,
+    request: AdminUserPasswordResetRequest,
+    _current_user: User = Depends(require_admin_user),
+) -> dict[str, object]:
+    try:
+        user = reset_user_password(user_id, request.password)
+    except UserNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is unavailable.",
+        ) from exc
+
+    return {
+        "status": "success",
+        "message": "User password reset.",
+        "user": public_user_payload(user),
+    }
 
 
 def build_report_run_options(request: ReportRunRequest) -> dict[str, object]:
@@ -125,17 +335,18 @@ def build_report_run_options(request: ReportRunRequest) -> dict[str, object]:
     }
 
 
-def load_task_run_records() -> list[dict[str, object]]:
+def load_task_run_records(user_id: int | None = None) -> list[dict[str, object]]:
     return load_task_run_records_from_store(
+        user_id=user_id,
         task_log_path=TASK_LOG_PATH,
         report_index_path=report_index.REPORT_INDEX_PATH,
     )
 
 
-def load_task_run_by_id(task_id: int) -> dict[str, object] | None:
+def load_task_run_by_id(task_id: int, *, user_id: int | None = None) -> dict[str, object] | None:
     if task_id < 1:
         return None
-    for task_run in load_task_run_records():
+    for task_run in load_task_run_records(user_id=user_id):
         if task_run.get("task_id") == task_id:
             return task_run
     return None
@@ -171,9 +382,13 @@ def build_failure_alert(task_run: dict[str, object] | None) -> dict[str, object]
     }
 
 
-def build_schedule_status(today: str | None = None) -> dict[str, object]:
+def build_schedule_status(
+    today: str | None = None,
+    *,
+    user_id: int | None = None,
+) -> dict[str, object]:
     today_value = today or date.today().isoformat()
-    task_runs = load_task_run_records()
+    task_runs = load_task_run_records(user_id=user_id)
     latest_run = task_runs[-1] if task_runs else None
     latest_success = find_latest_task_run(task_runs, "success")
     latest_failure = find_latest_task_run(task_runs, "failed")
@@ -227,7 +442,9 @@ def build_rerun_request_from_task(task_run: dict[str, object]) -> ReportRunReque
     run_options = task_run.get("run_options")
     if isinstance(run_options, dict):
         return ReportRunRequest(
-            codes=run_options.get("codes") if isinstance(run_options.get("codes"), list) else None,
+            codes=run_options.get("codes")
+            if isinstance(run_options.get("codes"), list)
+            else None,
             use_watchlist=bool(run_options.get("use_watchlist", True)),
             use_real_data=bool(run_options.get("use_real_data", True)),
             use_llm=bool(run_options.get("use_llm", False)),
@@ -251,7 +468,11 @@ def build_rerun_request_from_task(task_run: dict[str, object]) -> ReportRunReque
 
 
 @app.get("/funds/{fund_code}")
-def get_fund(fund_code: str, use_real_data: bool = True) -> dict[str, object]:
+def get_fund(
+    fund_code: str,
+    use_real_data: bool = True,
+    _current_user: User = Depends(require_authenticated_user),
+) -> dict[str, object]:
     try:
         return lookup_fund(fund_code=fund_code, use_real_data=use_real_data)
     except ValueError as exc:
@@ -267,7 +488,11 @@ def get_fund(fund_code: str, use_real_data: bool = True) -> dict[str, object]:
 
 
 @app.get("/funds/{fund_code}/snapshots")
-def get_fund_snapshots(fund_code: str, limit: int = 20) -> dict[str, object]:
+def get_fund_snapshots(
+    fund_code: str,
+    limit: int = 20,
+    _current_user: User = Depends(require_authenticated_user),
+) -> dict[str, object]:
     try:
         return load_fund_snapshots(fund_code=fund_code, limit=limit)
     except ValueError as exc:
@@ -283,6 +508,7 @@ def get_fund_snapshot_trend(
     start_date: date | None = None,
     end_date: date | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    _current_user: User = Depends(require_authenticated_user),
 ) -> dict[str, object]:
     if start_date is not None and end_date is not None and start_date > end_date:
         raise HTTPException(
@@ -310,8 +536,10 @@ def get_fund_snapshot_trend(
 
 
 @app.get("/watchlist")
-def get_watchlist() -> dict[str, object]:
-    fund_codes = load_watchlist_codes()
+def get_watchlist(
+    current_user: User | None = Depends(require_authenticated_user),
+) -> dict[str, object]:
+    fund_codes = _load_user_watchlist(current_user)
     return {
         "path": str(WATCHLIST_PATH),
         "count": len(fund_codes),
@@ -320,8 +548,15 @@ def get_watchlist() -> dict[str, object]:
 
 
 @app.put("/watchlist")
-def update_watchlist(request: WatchlistUpdateRequest) -> dict[str, object]:
-    fund_codes = save_watchlist_codes(request.fund_codes)
+def update_watchlist(
+    request: WatchlistUpdateRequest,
+    current_user: User | None = Depends(require_authenticated_user),
+) -> dict[str, object]:
+    user_id = _user_id_or_none(current_user)
+    if user_id is None:
+        fund_codes = save_watchlist_codes(request.fund_codes)
+    else:
+        fund_codes = save_watchlist_codes(request.fund_codes, user_id=user_id)
     return {
         "status": "success",
         "message": "Watchlist updated.",
@@ -332,9 +567,19 @@ def update_watchlist(request: WatchlistUpdateRequest) -> dict[str, object]:
 
 
 @app.post("/watchlist/funds", status_code=status.HTTP_201_CREATED)
-def add_watchlist_fund(request: WatchlistFundRequest) -> dict[str, object]:
+def add_watchlist_fund(
+    request: WatchlistFundRequest,
+    current_user: User | None = Depends(require_authenticated_user),
+) -> dict[str, object]:
     try:
-        fund_codes, added = add_watchlist_code(request.fund_code)
+        user_id = _user_id_or_none(current_user)
+        if user_id is None:
+            fund_codes, added = add_watchlist_code(request.fund_code)
+        else:
+            fund_codes, added = add_watchlist_code(
+                request.fund_code,
+                user_id=user_id,
+            )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -354,9 +599,19 @@ def add_watchlist_fund(request: WatchlistFundRequest) -> dict[str, object]:
 
 
 @app.delete("/watchlist/funds/{fund_code}")
-def delete_watchlist_fund(fund_code: str) -> dict[str, object]:
+def delete_watchlist_fund(
+    fund_code: str,
+    current_user: User | None = Depends(require_authenticated_user),
+) -> dict[str, object]:
     try:
-        fund_codes, removed = remove_watchlist_code(fund_code)
+        user_id = _user_id_or_none(current_user)
+        if user_id is None:
+            fund_codes, removed = remove_watchlist_code(fund_code)
+        else:
+            fund_codes, removed = remove_watchlist_code(
+                fund_code,
+                user_id=user_id,
+            )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -388,6 +643,7 @@ def list_reports(
     fund_code: str | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
+    current_user: User | None = Depends(require_authenticated_user),
 ) -> dict[str, object]:
     if start_date is not None and end_date is not None and start_date > end_date:
         raise HTTPException(
@@ -409,6 +665,7 @@ def list_reports(
             fund_code=fund_code,
             limit=limit,
             offset=offset,
+            **_user_kwargs(current_user),
         )
     except SQLAlchemyError as exc:
         raise HTTPException(
@@ -418,9 +675,11 @@ def list_reports(
 
 
 @app.get("/reports/latest")
-def get_latest_report() -> dict[str, object]:
+def get_latest_report(
+    current_user: User | None = Depends(require_authenticated_user),
+) -> dict[str, object]:
     try:
-        detail = load_latest_report_detail()
+        detail = load_latest_report_detail(**_user_kwargs(current_user))
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -434,9 +693,15 @@ def get_latest_report() -> dict[str, object]:
 
 
 @app.get("/reports/{report_id}")
-def get_report_detail(report_id: int) -> dict[str, object]:
+def get_report_detail(
+    report_id: int,
+    current_user: User | None = Depends(require_authenticated_user),
+) -> dict[str, object]:
     try:
-        detail = load_report_detail(report_id=report_id)
+        detail = load_report_detail(
+            report_id=report_id,
+            **_user_kwargs(current_user),
+        )
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -453,8 +718,11 @@ def get_report_detail(report_id: int) -> dict[str, object]:
 
 
 @app.post("/reports/run", status_code=status.HTTP_201_CREATED)
-def run_report(request: ReportRunRequest) -> dict[str, object]:
-    if request.codes is None and request.use_watchlist and not load_watchlist_codes():
+def run_report(
+    request: ReportRunRequest,
+    current_user: User | None = Depends(require_authenticated_user),
+) -> dict[str, object]:
+    if request.codes is None and request.use_watchlist and not _load_user_watchlist(current_user):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Watchlist is empty. Add at least one fund code before running a watchlist report.",
@@ -466,14 +734,21 @@ def run_report(request: ReportRunRequest) -> dict[str, object]:
             detail="A report generation task is already running.",
         )
 
-    task = start_task(run_options=build_report_run_options(request))
+    task = start_task(
+        run_options=build_report_run_options(request),
+        **_user_kwargs(current_user),
+    )
     try:
-        result = run_daily_report(
-            codes=request.codes,
-            use_llm=request.use_llm,
-            use_real_data=request.use_real_data,
-            use_watchlist=request.use_watchlist,
-        )
+        report_kwargs: dict[str, object] = {
+            "codes": request.codes,
+            "use_llm": request.use_llm,
+            "use_real_data": request.use_real_data,
+            "use_watchlist": request.use_watchlist,
+        }
+        user_kwargs = _user_kwargs(current_user)
+        if user_kwargs:
+            report_kwargs.update(user_kwargs)
+        result = run_daily_report(**report_kwargs)
     except Exception as exc:
         finish_task_failed(task=task, error=exc)
         raise HTTPException(
@@ -502,9 +777,12 @@ def run_report(request: ReportRunRequest) -> dict[str, object]:
 
 
 @app.post("/reports/run-async", status_code=status.HTTP_202_ACCEPTED)
-def enqueue_report_run(request: ReportRunRequest) -> dict[str, object]:
+def enqueue_report_run(
+    request: ReportRunRequest,
+    current_user: User | None = Depends(require_authenticated_user),
+) -> dict[str, object]:
     if request.codes is None and request.use_watchlist:
-        fund_codes = load_watchlist_codes()
+        fund_codes = _load_user_watchlist(current_user)
         if not fund_codes:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -517,6 +795,7 @@ def enqueue_report_run(request: ReportRunRequest) -> dict[str, object]:
     pending_task = create_pending_task_run(
         run_options=run_options,
         fund_codes=fund_codes,
+        **_user_kwargs(current_user),
     )
     task_id = int(pending_task["task_id"])
     payload = {
@@ -527,6 +806,8 @@ def enqueue_report_run(request: ReportRunRequest) -> dict[str, object]:
         "use_real_data": request.use_real_data,
         "use_llm": request.use_llm,
     }
+    if _user_kwargs(current_user):
+        payload["user_id"] = _user_kwargs(current_user)["user_id"]
 
     try:
         queue_size = enqueue_report_task(payload)
@@ -563,6 +844,7 @@ def list_task_runs(
     failed_only: bool = False,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
+    current_user: User | None = Depends(require_authenticated_user),
 ) -> dict[str, object]:
     if start_date is not None and end_date is not None and start_date > end_date:
         raise HTTPException(
@@ -584,6 +866,7 @@ def list_task_runs(
             failed_only=failed_only,
             limit=limit,
             offset=offset,
+            **_user_kwargs(current_user),
         )
     except SQLAlchemyError as exc:
         raise HTTPException(
@@ -601,13 +884,18 @@ def list_task_runs(
 
 
 @app.get("/schedule/status")
-def get_schedule_status() -> dict[str, object]:
-    return build_schedule_status()
+def get_schedule_status(
+    current_user: User | None = Depends(require_authenticated_user),
+) -> dict[str, object]:
+    return build_schedule_status(user_id=_user_id_or_none(current_user))
 
 
 @app.get("/task-runs/{task_id}")
-def get_task_run_detail(task_id: int) -> dict[str, object]:
-    task_run = load_task_run_by_id(task_id=task_id)
+def get_task_run_detail(
+    task_id: int,
+    current_user: User | None = Depends(require_authenticated_user),
+) -> dict[str, object]:
+    task_run = load_task_run_by_id(task_id=task_id, **_user_kwargs(current_user))
     if task_run is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -629,8 +917,11 @@ def get_task_run_detail(task_id: int) -> dict[str, object]:
 
 
 @app.post("/task-runs/{task_id}/rerun", status_code=status.HTTP_201_CREATED)
-def rerun_task_run(task_id: int) -> dict[str, object]:
-    task_run = load_task_run_by_id(task_id=task_id)
+def rerun_task_run(
+    task_id: int,
+    current_user: User | None = Depends(require_authenticated_user),
+) -> dict[str, object]:
+    task_run = load_task_run_by_id(task_id=task_id, **_user_kwargs(current_user))
     if task_run is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -643,7 +934,7 @@ def rerun_task_run(task_id: int) -> dict[str, object]:
         )
 
     request = build_rerun_request_from_task(task_run)
-    response = run_report(request)
+    response = run_report(request, current_user=current_user)
     return {
         **response,
         "rerun_of_task_id": task_id,
@@ -652,12 +943,54 @@ def rerun_task_run(task_id: int) -> dict[str, object]:
 
 
 @app.get("/fund-snapshots")
-def list_fund_snapshots(limit: int = 50) -> dict[str, object]:
+def list_fund_snapshots(
+    limit: int = 50,
+    _current_user: User = Depends(require_authenticated_user),
+) -> dict[str, object]:
     records = load_snapshot_records(limit=limit, snapshot_path=SNAPSHOT_PATH)
     return {
         "count": len(records),
         "snapshots": records,
     }
+
+
+def _request_target(request: Request) -> str:
+    query = request.url.query
+    return request.url.path + (f"?{query}" if query else "")
+
+
+def _login_redirect(request: Request) -> RedirectResponse:
+    target = quote(_request_target(request), safe="")
+    return RedirectResponse(
+        url=f"/login?next={target}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.get("/", include_in_schema=False, response_model=None)
+@app.get("/index.html", include_in_schema=False, response_model=None)
+def get_dashboard_page(request: Request) -> FileResponse | RedirectResponse:
+    if load_current_user(request.cookies.get(SESSION_COOKIE_NAME)) is None:
+        return _login_redirect(request)
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/login", include_in_schema=False, response_model=None)
+def get_login_page(request: Request) -> FileResponse | RedirectResponse:
+    if load_current_user(request.cookies.get(SESSION_COOKIE_NAME)) is not None:
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+    return FileResponse(WEB_DIR / "login.html")
+
+
+@app.get("/admin.html", include_in_schema=False, response_model=None)
+@app.get("/admin", include_in_schema=False, response_model=None)
+def get_admin_page(request: Request) -> FileResponse | RedirectResponse:
+    user = load_current_user(request.cookies.get(SESSION_COOKIE_NAME))
+    if user is None:
+        return _login_redirect(request)
+    if user.role != ROLE_ADMIN:
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+    return FileResponse(WEB_DIR / "admin.html")
 
 
 if WEB_DIR.exists():

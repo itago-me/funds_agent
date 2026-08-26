@@ -73,14 +73,22 @@ def _load_records_from_jsonl(path: Path) -> list[dict[str, object]]:
     return records
 
 
+def _record_matches_user_id(record: dict[str, object], user_id: int | None) -> bool:
+    if user_id is None:
+        return True
+    return record.get("user_id") == user_id
+
+
 def _build_report_lookup(
     *,
     report_index_path: Path,
+    user_id: int | None = None,
     session_factory: SessionFactory | None = None,
 ) -> tuple[dict[int, dict[str, object]], dict[str, dict[str, object]]]:
     by_id: dict[int, dict[str, object]] = {}
     by_path: dict[str, dict[str, object]] = {}
     for record in load_report_records(
+        user_id=user_id,
         session_factory=session_factory,
         report_index_path=report_index_path,
     ):
@@ -131,6 +139,7 @@ def _enrich_report_link(
 def _record_from_model(task_run: TaskRun) -> dict[str, object]:
     record: dict[str, object] = {
         "task_id": task_run.id,
+        "user_id": task_run.user_id,
         "report_id": task_run.report_id,
         "started_at": _format_datetime(task_run.started_at),
         "finished_at": _format_datetime(task_run.finished_at),
@@ -173,6 +182,7 @@ def _model_from_record(session: object, record: dict[str, object]) -> TaskRun:
     started_at = _parse_datetime(record.get("started_at")) or datetime.now().replace(microsecond=0)
     duration = record.get("duration_seconds")
     return TaskRun(
+        user_id=record.get("user_id"),
         report_id=_find_report_id_for_record(session, record),
         started_at=started_at,
         finished_at=_parse_datetime(record.get("finished_at")),
@@ -207,8 +217,11 @@ def _seed_database_from_jsonl(
     *,
     report_lookup_by_id: dict[int, dict[str, object]],
     report_lookup_by_path: dict[str, dict[str, object]],
+    user_id: int | None = None,
 ) -> list[dict[str, object]]:
     for record in records:
+        if user_id is not None:
+            record = {**record, "user_id": user_id}
         session.add(_model_from_record(session, record))
     session.commit()
     task_runs = session.execute(select(TaskRun).order_by(TaskRun.id.asc())).scalars().all()
@@ -224,21 +237,24 @@ def _seed_database_from_jsonl(
 
 def load_task_run_records(
     *,
+    user_id: int | None = None,
     session_factory: SessionFactory | None = None,
     task_log_path: Path = TASK_LOG_PATH,
     report_index_path: Path = REPORT_INDEX_PATH,
 ) -> list[dict[str, object]]:
     report_lookup_by_id, report_lookup_by_path = _build_report_lookup(
         report_index_path=report_index_path,
+        user_id=user_id,
         session_factory=session_factory,
     )
     jsonl_records = _load_records_from_jsonl(task_log_path)
     factory = session_factory or _default_session_factory()
     try:
         with factory() as session:
-            task_runs = session.execute(
-                select(TaskRun).order_by(TaskRun.id.asc())
-            ).scalars().all()
+            query = select(TaskRun).order_by(TaskRun.id.asc())
+            if user_id is not None:
+                query = query.where(TaskRun.user_id == user_id)
+            task_runs = session.execute(query).scalars().all()
             if task_runs:
                 return [
                     _enrich_report_link(
@@ -248,12 +264,15 @@ def load_task_run_records(
                     )
                     for task_run in task_runs
                 ]
+            if user_id is not None:
+                return []
             if jsonl_records:
                 return _seed_database_from_jsonl(
                     session,
                     jsonl_records,
                     report_lookup_by_id=report_lookup_by_id,
                     report_lookup_by_path=report_lookup_by_path,
+                    user_id=user_id,
                 )
     except Exception:
         return [
@@ -263,6 +282,7 @@ def load_task_run_records(
                 report_lookup_by_path=report_lookup_by_path,
             )
             for record in jsonl_records
+            if _record_matches_user_id(record, user_id)
         ]
 
     return []
@@ -275,6 +295,7 @@ def query_task_run_records(
     end_date: date | None = None,
     has_report: bool | None = None,
     failed_only: bool = False,
+    user_id: int | None = None,
     limit: int = 20,
     offset: int = 0,
     session_factory: SessionFactory | None = None,
@@ -285,6 +306,7 @@ def query_task_run_records(
     normalized_status = status_value.strip() if status_value else None
     report_lookup_by_id, report_lookup_by_path = _build_report_lookup(
         report_index_path=report_index_path,
+        user_id=user_id,
         session_factory=session_factory,
     )
     factory = session_factory or _default_session_factory()
@@ -303,6 +325,8 @@ def query_task_run_records(
             filters.append(TaskRun.report_id.is_not(None))
         elif has_report is False:
             filters.append(TaskRun.report_id.is_(None))
+        if user_id is not None:
+            filters.append(TaskRun.user_id == user_id)
 
         total = session.execute(
             select(func.count()).select_from(TaskRun).where(*filters)
@@ -331,6 +355,7 @@ def create_pending_task_run(
     task_id: int | None = None,
     run_options: dict[str, object] | None = None,
     fund_codes: list[str] | None = None,
+    user_id: int | None = None,
     session_factory: SessionFactory | None = None,
     task_log_path: Path = TASK_LOG_PATH,
     report_index_path: Path = REPORT_INDEX_PATH,
@@ -342,6 +367,8 @@ def create_pending_task_run(
         "warnings": [],
         "warnings_count": 0,
     }
+    if user_id is not None:
+        record["user_id"] = user_id
     if run_options is not None:
         record["run_options"] = run_options
 

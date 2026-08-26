@@ -8,6 +8,24 @@
   </head>
   <body>
     <main class="page-shell">
+      <header class="topbar">
+        <a class="brand-mark" href="/">
+          <span class="brand-mark-icon">F</span>
+          <span>
+            <strong>Funds Agent</strong>
+            <small>基金分析工作台</small>
+          </span>
+        </a>
+        <div id="auth-status" class="auth-status">
+          <span id="auth-user-name" class="auth-user-name">检查登录状态...</span>
+          <a id="admin-link" class="auth-login-link hidden" href="/admin">管理后台</a>
+          <a id="auth-login-link" class="auth-login-link hidden" href="/login">登录</a>
+          <button id="auth-logout-button" class="auth-logout-button hidden" type="button">
+            退出登录
+          </button>
+        </div>
+      </header>
+
       <section class="hero panel">
         <div>
           <p class="eyebrow">Funds Agent</p>

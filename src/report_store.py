@@ -77,9 +77,16 @@ def _load_records_from_jsonl(path: Path) -> list[dict[str, object]]:
     return records
 
 
+def _record_matches_user_id(record: dict[str, object], user_id: int | None) -> bool:
+    if user_id is None:
+        return True
+    return record.get("user_id") == user_id
+
+
 def _record_from_model(report: Report) -> dict[str, object]:
-    return {
+    record: dict[str, object] = {
         "report_id": report.id,
+        "user_id": report.user_id,
         "created_at": _format_datetime(report.created_at),
         "report_date": _format_date(report.report_date),
         "report_path": normalize_report_path_for_storage(report.report_path),
@@ -89,11 +96,13 @@ def _record_from_model(report: Report) -> dict[str, object]:
         "warnings": _normalize_list(report.warnings),
         "history_comparison": _normalize_dict(report.history_comparison),
     }
+    return {key: value for key, value in record.items() if value is not None}
 
 
-def _model_from_record(record: dict[str, object]) -> Report:
+def _model_from_record(record: dict[str, object], *, user_id: int | None = None) -> Report:
     fund_codes = _normalize_list(record.get("fund_codes"))
     report = Report(
+        user_id=user_id if user_id is not None else record.get("user_id"),
         created_at=_parse_datetime(record.get("created_at")),
         report_date=_parse_date(record.get("report_date")),
         report_path=normalize_report_path_for_storage(
@@ -131,9 +140,12 @@ def _append_jsonl_record(path: Path, record: dict[str, object]) -> None:
 def _seed_database_from_jsonl(
     session: object,
     records: list[dict[str, object]],
+    *,
+    user_id: int | None = None,
 ) -> list[dict[str, object]]:
     for record in records:
-        session.add(_model_from_record(record))
+        record_user_id = user_id if user_id is not None else record.get("user_id")
+        session.add(_model_from_record(record, user_id=record_user_id))
     session.commit()
     reports = session.execute(select(Report).order_by(Report.id.asc())).scalars().all()
     return [_record_from_model(report) for report in reports]
@@ -141,6 +153,7 @@ def _seed_database_from_jsonl(
 
 def load_report_records(
     *,
+    user_id: int | None = None,
     session_factory: SessionFactory | None = None,
     report_index_path: Path = REPORT_INDEX_PATH,
 ) -> list[dict[str, object]]:
@@ -148,15 +161,20 @@ def load_report_records(
     jsonl_records = _load_records_from_jsonl(report_index_path)
     try:
         with factory() as session:
-            reports = session.execute(
-                select(Report).order_by(Report.id.asc())
-            ).scalars().all()
+            query = select(Report).order_by(Report.id.asc())
+            if user_id is not None:
+                query = query.where(Report.user_id == user_id)
+            reports = session.execute(query).scalars().all()
             if reports:
                 return [_record_from_model(report) for report in reports]
+            if user_id is not None:
+                return []
             if jsonl_records:
                 return _seed_database_from_jsonl(session, jsonl_records)
     except Exception:
-        return jsonl_records
+        return [
+            record for record in jsonl_records if _record_matches_user_id(record, user_id)
+        ]
 
     return []
 
@@ -168,6 +186,7 @@ def query_report_records(
     data_source: str | None = None,
     analysis_mode: str | None = None,
     fund_code: str | None = None,
+    user_id: int | None = None,
     limit: int = 20,
     offset: int = 0,
     session_factory: SessionFactory | None = None,
@@ -187,6 +206,8 @@ def query_report_records(
         conditions.append(
             Report.report_funds.any(ReportFund.fund_code == normalized_code)
         )
+    if user_id is not None:
+        conditions.append(Report.user_id == user_id)
 
     normalized_limit = max(1, min(limit, 100))
     normalized_offset = max(0, offset)
@@ -216,6 +237,7 @@ def append_report_record(
     fund_codes: list[str] | None,
     warnings: list[str],
     history_comparison: dict[str, object] | None = None,
+    user_id: int | None = None,
     session_factory: SessionFactory | None = None,
     report_index_path: Path = REPORT_INDEX_PATH,
 ) -> None:
@@ -229,12 +251,14 @@ def append_report_record(
         "warnings": warnings,
         "history_comparison": history_comparison or {},
     }
+    if user_id is not None:
+        record["user_id"] = user_id
 
     factory = session_factory or _default_session_factory()
     database_error: Exception | None = None
     try:
         with factory() as session:
-            session.add(_model_from_record(record))
+            session.add(_model_from_record(record, user_id=user_id))
             session.commit()
     except Exception as exc:
         database_error = exc

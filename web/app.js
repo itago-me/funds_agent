@@ -1,5 +1,7 @@
 const api = {
   health: "/health",
+  authLogout: "/auth/logout",
+  authMe: "/auth/me",
   fund: (fundCode, useRealData) =>
     `/funds/${encodeURIComponent(fundCode)}?use_real_data=${useRealData}`,
   fundSnapshots: (fundCode, limit = 10) =>
@@ -24,6 +26,11 @@ const api = {
 const elements = {
   apiStatusDot: document.querySelector("#api-status-dot"),
   apiStatusText: document.querySelector("#api-status-text"),
+  authStatus: document.querySelector("#auth-status"),
+  authUserName: document.querySelector("#auth-user-name"),
+  adminLink: document.querySelector("#admin-link"),
+  authLoginLink: document.querySelector("#auth-login-link"),
+  authLogoutButton: document.querySelector("#auth-logout-button"),
   watchlistCount: document.querySelector("#watchlist-count"),
   taskCount: document.querySelector("#task-count"),
   snapshotCount: document.querySelector("#snapshot-count"),
@@ -98,8 +105,21 @@ function buildQueryUrl(path, params = {}) {
   return queryString ? `${path}?${queryString}` : path;
 }
 
+function redirectToLogin() {
+  if (window.location.pathname === "/login") {
+    return;
+  }
+
+  const next = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  const target = next || "/";
+  window.location.href = `/login?next=${encodeURIComponent(target)}`;
+}
+
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
+  const response = await fetch(url, { credentials: "same-origin", ...options });
+  if (response.status === 401) {
+    redirectToLogin();
+  }
   if (!response.ok) {
     let message = `${url} returned ${response.status}`;
     try {
@@ -826,6 +846,30 @@ async function loadDashboard() {
   await loadInitialReportFromUrl();
 }
 
+async function loadCurrentUser() {
+  try {
+    const data = await fetchJson(api.authMe);
+    const user = data.user ?? null;
+    elements.authUserName.textContent = user
+      ? `${user.username ?? "已登录"} (${user.role ?? "user"})`
+      : "未登录";
+    if (user?.role === "admin") {
+      elements.adminLink.classList.remove("hidden");
+    } else {
+      elements.adminLink.classList.add("hidden");
+    }
+    elements.authLoginLink.classList.add("hidden");
+    elements.authLogoutButton.classList.remove("hidden");
+    return user;
+  } catch (error) {
+    elements.adminLink.classList.add("hidden");
+    elements.authUserName.textContent = "未登录";
+    elements.authLoginLink.classList.remove("hidden");
+    elements.authLogoutButton.classList.add("hidden");
+    return null;
+  }
+}
+
 async function addWatchlistFund(fundCode) {
   return fetchJson(api.addWatchlistFund, {
     method: "POST",
@@ -977,6 +1021,12 @@ async function runWatchlistReport(options) {
   });
 }
 
+async function logoutUser() {
+  return fetchJson(api.authLogout, {
+    method: "POST",
+  });
+}
+
 async function runSingleFundReport(fundCode, options) {
   return fetchJson(api.runReportAsync, {
     method: "POST",
@@ -1021,6 +1071,22 @@ async function handleFundLookupSubmit(event) {
   } finally {
     elements.fundLookupButton.disabled = false;
     elements.fundLookupUseRealData.disabled = false;
+  }
+}
+
+async function handleLogoutClick() {
+  elements.authLogoutButton.disabled = true;
+  try {
+    await logoutUser();
+    elements.adminLink.classList.add("hidden");
+    elements.authUserName.textContent = "未登录";
+    elements.authLoginLink.classList.remove("hidden");
+    elements.authLogoutButton.classList.add("hidden");
+    window.location.href = "/login";
+  } catch (error) {
+    elements.authUserName.textContent = "注销失败";
+  } finally {
+    elements.authLogoutButton.disabled = false;
   }
 }
 
@@ -1389,6 +1455,7 @@ async function handleRunWatchlistReport() {
 }
 
 elements.refreshButton.addEventListener("click", loadDashboard);
+elements.authLogoutButton.addEventListener("click", handleLogoutClick);
 elements.runWatchlistReportButton.addEventListener("click", handleRunWatchlistReport);
 elements.watchlistForm.addEventListener("submit", handleWatchlistSubmit);
 elements.watchlist.addEventListener("click", handleWatchlistClick);
@@ -1404,4 +1471,12 @@ elements.taskFilterForm.addEventListener("click", handleFilterReset);
 elements.taskRuns.addEventListener("click", handleTaskRunsClick);
 elements.snapshotFilterForm.addEventListener("submit", handleSnapshotFilterSubmit);
 elements.snapshotFilterForm.addEventListener("click", handleFilterReset);
-loadDashboard();
+
+async function initializeDashboard() {
+  const user = await loadCurrentUser();
+  if (user) {
+    await loadDashboard();
+  }
+}
+
+initializeDashboard();
