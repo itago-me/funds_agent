@@ -27,8 +27,10 @@ from src.auth_service import (
     authenticate_user,
     load_current_user,
     public_user_payload,
+    register_user,
     require_admin_user,
     require_authenticated_user,
+    UsernameAlreadyExistsError,
 )
 from src.auth_session import (
     SESSION_COOKIE_NAME,
@@ -128,6 +130,11 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1)
 
 
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
 class AdminUserUpdateRequest(BaseModel):
     role: str | None = None
     is_active: bool | None = None
@@ -204,6 +211,33 @@ def login(request: LoginRequest, response: Response) -> dict[str, object]:
     return {
         "status": "success",
         "message": "Login successful.",
+        "user": public_user_payload(user),
+    }
+
+
+@app.post("/auth/register", status_code=status.HTTP_201_CREATED)
+def register(request: RegisterRequest) -> dict[str, object]:
+    try:
+        user = register_user(username=request.username, password=request.password)
+    except UsernameAlreadyExistsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is unavailable.",
+        ) from exc
+
+    return {
+        "status": "success",
+        "message": "Registration successful.",
         "user": public_user_payload(user),
     }
 
@@ -980,6 +1014,13 @@ def get_login_page(request: Request) -> FileResponse | RedirectResponse:
     if load_current_user(request.cookies.get(SESSION_COOKIE_NAME)) is not None:
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
     return FileResponse(WEB_DIR / "login.html")
+
+
+@app.get("/register", include_in_schema=False, response_model=None)
+def get_register_page(request: Request) -> FileResponse | RedirectResponse:
+    if load_current_user(request.cookies.get(SESSION_COOKIE_NAME)) is not None:
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+    return FileResponse(WEB_DIR / "register.html")
 
 
 @app.get("/admin.html", include_in_schema=False, response_model=None)

@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>登录-基金智能体</title>
+    <title>创建用户-基金智能体</title>
     <link rel="stylesheet" href="/style.css" />
   </head>
-  <body class="login-page">
+  <body class="register-page">
     <main class="login-shell">
       <a class="login-brand" href="/">
         <span class="brand-mark-icon">F</span>
@@ -16,18 +16,18 @@
         </span>
       </a>
 
-      <section class="login-card">
+      <section class="register-card">
         <div class="login-heading">
-          <p class="eyebrow">Welcome Back</p>
-          <h1>欢迎回来</h1>
-          <p>登录账号享受完整服务</p>
+          <p class="eyebrow">Create Account</p>
+          <h1>创建新用户</h1>
+          <p>注册后即可使用系统的完整功能。</p>
         </div>
 
-        <form id="login-form" class="login-form">
+        <form id="register-form" class="register-form">
           <label>
             <span>用户名</span>
             <input
-              id="login-username"
+              id="register-username"
               name="username"
               type="text"
               autocomplete="username"
@@ -39,23 +39,34 @@
           <label>
             <span>密码</span>
             <input
-              id="login-password"
+              id="register-password"
               name="password"
               type="password"
-              autocomplete="current-password"
+              autocomplete="new-password"
               placeholder="请输入密码"
               required
             />
           </label>
-          <button id="login-button" type="submit">登录</button>
+          <label>
+            <span>确认密码</span>
+            <input
+              id="register-password-confirm"
+              name="password_confirm"
+              type="password"
+              autocomplete="new-password"
+              placeholder="再次输入密码"
+              required
+            />
+          </label>
+          <button id="register-button" type="submit">注册</button>
         </form>
 
-        <div id="login-message" class="form-message" role="status" aria-live="polite"></div>
+        <div id="register-message" class="form-message" role="status" aria-live="polite"></div>
         <p class="login-footer">
-          <a href="/register">没有账户？创建新用户</a>
+          <a href="/login">已有账户？返回登录</a>
         </p>
       </section>
     </main>
-    <script src="/login.js"></script>
+    <script src="/register.js"></script>
   </body>
 </html>

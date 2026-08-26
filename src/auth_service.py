@@ -7,17 +7,22 @@ from typing import Any, Callable
 
 from fastapi import HTTPException, Request, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from src.auth_session import SESSION_COOKIE_NAME, read_session_user_id
-from src.authorization import ROLE_ADMIN
+from src.authorization import ROLE_ADMIN, ROLE_USER
 from src.db import get_session_factory
 from src.models import User
-from src.password_service import verify_password
+from src.password_service import hash_password, verify_password
 
 
 SessionFactory = Callable[[], AbstractContextManager]
 SessionUserIdLoader = Callable[[str | None], int | None]
 CurrentUserLoader = Callable[[str | None], User | None]
+
+
+class UsernameAlreadyExistsError(ValueError):
+    """Raised when a registration request uses an existing username."""
 
 
 def authenticate_user(
@@ -40,6 +45,45 @@ def authenticate_user(
             return None
         if not verify_password(password, user.password_hash):
             return None
+        return user
+    finally:
+        session.close()
+
+
+def register_user(
+    username: str,
+    password: str,
+    *,
+    session_factory: SessionFactory | None = None,
+) -> User:
+    normalized_username = username.strip()
+    if not normalized_username:
+        raise ValueError("Username must not be empty.")
+    if not password:
+        raise ValueError("Password must not be empty.")
+
+    factory = session_factory or get_session_factory()
+    session = factory()
+    try:
+        existing_user = session.execute(
+            select(User).where(User.username == normalized_username)
+        ).scalar_one_or_none()
+        if existing_user is not None:
+            raise UsernameAlreadyExistsError("Username already exists.")
+
+        user = User(
+            username=normalized_username,
+            password_hash=hash_password(password),
+            role=ROLE_USER,
+            is_active=True,
+        )
+        session.add(user)
+        try:
+            session.commit()
+        except IntegrityError as exc:
+            session.rollback()
+            raise UsernameAlreadyExistsError("Username already exists.") from exc
+        session.refresh(user)
         return user
     finally:
         session.close()
