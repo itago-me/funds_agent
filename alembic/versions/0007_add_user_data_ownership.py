@@ -23,6 +23,32 @@ depends_on: Union[str, Sequence[str], None] = None
 OWNERSHIP_TABLES = ("watchlist_items", "reports", "task_runs")
 
 
+def _has_column(inspector: sa.Inspector, table_name: str, column_name: str) -> bool:
+    return any(column["name"] == column_name for column in inspector.get_columns(table_name))
+
+
+def _has_index(inspector: sa.Inspector, table_name: str, index_name: str) -> bool:
+    return any(index["name"] == index_name for index in inspector.get_indexes(table_name))
+
+
+def _has_unique_constraint(
+    inspector: sa.Inspector,
+    table_name: str,
+    constraint_name: str,
+) -> bool:
+    return any(
+        constraint["name"] == constraint_name
+        for constraint in inspector.get_unique_constraints(table_name)
+    )
+
+
+def _has_foreign_key(inspector: sa.Inspector, table_name: str, fk_name: str) -> bool:
+    return any(
+        foreign_key["name"] == fk_name
+        for foreign_key in inspector.get_foreign_keys(table_name)
+    )
+
+
 def _default_owner_id(bind: sa.Connection) -> int | None:
     """Choose an existing administrator as the default owner for old rows."""
     rows = bind.execute(
@@ -62,52 +88,96 @@ def _drop_legacy_watchlist_uniqueness(bind: sa.Connection) -> None:
             op.drop_constraint(name, "watchlist_items", type_="unique")
 
 
-def upgrade() -> None:
-    for table_name in OWNERSHIP_TABLES:
-        op.add_column(
-            table_name,
-            sa.Column("user_id", sa.Integer(), nullable=True),
+def _remove_duplicate_watchlist_rows(bind: sa.Connection) -> None:
+    bind.execute(
+        sa.text(
+            """
+            DELETE w1
+            FROM watchlist_items AS w1
+            JOIN watchlist_items AS w2
+              ON w1.user_id <=> w2.user_id
+             AND w1.fund_code = w2.fund_code
+             AND w1.id > w2.id
+            """
         )
+    )
+
+
+def upgrade() -> None:
+    inspector: sa.Inspector | None = None
+    if not context.is_offline_mode():
+        inspector = sa.inspect(op.get_bind())
+
+    for table_name in OWNERSHIP_TABLES:
+        if inspector is None or not _has_column(inspector, table_name, "user_id"):
+            op.add_column(
+                table_name,
+                sa.Column("user_id", sa.Integer(), nullable=True),
+            )
 
     # Offline SQL generation cannot inspect or update existing rows.
     if not context.is_offline_mode():
         bind = op.get_bind()
         _backfill_default_owner(bind, _default_owner_id(bind))
+        _remove_duplicate_watchlist_rows(bind)
         _drop_legacy_watchlist_uniqueness(bind)
 
-    op.create_index("ix_watchlist_items_user_id", "watchlist_items", ["user_id"])
-    op.create_index("ix_reports_user_id", "reports", ["user_id"])
-    op.create_index("ix_task_runs_user_id", "task_runs", ["user_id"])
+    if inspector is None or not _has_index(inspector, "watchlist_items", "ix_watchlist_items_user_id"):
+        op.create_index("ix_watchlist_items_user_id", "watchlist_items", ["user_id"])
+    if inspector is None or not _has_index(inspector, "reports", "ix_reports_user_id"):
+        op.create_index("ix_reports_user_id", "reports", ["user_id"])
+    if inspector is None or not _has_index(inspector, "task_runs", "ix_task_runs_user_id"):
+        op.create_index("ix_task_runs_user_id", "task_runs", ["user_id"])
 
-    op.create_foreign_key(
+    if inspector is None or not _has_foreign_key(
+        inspector,
+        "watchlist_items",
         "fk_watchlist_items_user_id_users",
-        "watchlist_items",
-        "users",
-        ["user_id"],
-        ["id"],
-        ondelete="CASCADE",
-    )
-    op.create_foreign_key(
-        "fk_reports_user_id_users",
+    ):
+        op.create_foreign_key(
+            "fk_watchlist_items_user_id_users",
+            "watchlist_items",
+            "users",
+            ["user_id"],
+            ["id"],
+            ondelete="CASCADE",
+        )
+    if inspector is None or not _has_foreign_key(
+        inspector,
         "reports",
-        "users",
-        ["user_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
-    op.create_foreign_key(
-        "fk_task_runs_user_id_users",
+        "fk_reports_user_id_users",
+    ):
+        op.create_foreign_key(
+            "fk_reports_user_id_users",
+            "reports",
+            "users",
+            ["user_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
+    if inspector is None or not _has_foreign_key(
+        inspector,
         "task_runs",
-        "users",
-        ["user_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
-    op.create_unique_constraint(
-        "uq_watchlist_items_user_fund",
+        "fk_task_runs_user_id_users",
+    ):
+        op.create_foreign_key(
+            "fk_task_runs_user_id_users",
+            "task_runs",
+            "users",
+            ["user_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
+    if inspector is None or not _has_unique_constraint(
+        inspector,
         "watchlist_items",
-        ["user_id", "fund_code"],
-    )
+        "uq_watchlist_items_user_fund",
+    ):
+        op.create_unique_constraint(
+            "uq_watchlist_items_user_fund",
+            "watchlist_items",
+            ["user_id", "fund_code"],
+        )
 
 
 def downgrade() -> None:
