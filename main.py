@@ -76,14 +76,14 @@ def run_daily_report(
         prefer_real_data=use_real_data,
     )
     funds = enrich_funds_with_risk(funds)
-    previous_snapshots = load_latest_snapshots_by_code()
+    previous_snapshots = load_latest_snapshots_by_code(user_id=user_id)
     funds = enrich_funds_with_snapshot_comparison(
         funds=funds,
         previous_snapshots=previous_snapshots,
     )
 
     analysis_mode = "rule"
-    previous_record = load_latest_report_record()
+    previous_record = load_latest_report_record(user_id=user_id)
     if use_llm and is_llm_available():
         try:
             analysis_mode = "deepseek_llm"
@@ -140,11 +140,16 @@ def run_daily_report(
         print(f"fund codes: {', '.join(selected_codes)}")
     for warning in warnings:
         print(f"warning: {warning}")
-    report_path = write_report(content=report, report_date=report_date)
+    report_path = write_report(
+        content=report,
+        report_date=report_date,
+        user_id=user_id,
+    )
     append_fund_snapshots(
         funds=funds,
         report_date=report_date.isoformat(),
         data_source=data_source,
+        user_id=user_id,
     )
     append_report_index(
         report_path=report_path,

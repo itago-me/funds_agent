@@ -14,6 +14,15 @@ except ModuleNotFoundError as exc:  # pragma: no cover - dependency setup failur
 _password_hash = PasswordHash.recommended()
 
 
+def validate_password_policy(password: str) -> None:
+    if len(password) < 8:
+        raise ValueError("Password must be at least 8 characters long.")
+    if not any(character.isalpha() for character in password):
+        raise ValueError("Password must include at least one letter.")
+    if not any(character.isdigit() for character in password):
+        raise ValueError("Password must include at least one number.")
+
+
 def hash_password(password: str) -> str:
     """Return a salted Argon2id password hash."""
     if not password:

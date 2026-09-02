@@ -83,6 +83,34 @@ class User(Base):
     )
     reports: Mapped[list["Report"]] = relationship(back_populates="user")
     task_runs: Mapped[list["TaskRun"]] = relationship(back_populates="user")
+    fund_snapshots: Mapped[list["FundSnapshot"]] = relationship(back_populates="user")
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    actor_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    target_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    action: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
 
 
 class Report(Base):
@@ -176,6 +204,11 @@ class FundSnapshot(Base):
     __tablename__ = "fund_snapshots"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
@@ -194,3 +227,5 @@ class FundSnapshot(Base):
     )
     risk_level: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     change_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    user: Mapped["User | None"] = relationship(back_populates="fund_snapshots")

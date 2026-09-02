@@ -10,6 +10,19 @@ function setMessage(text, type = "") {
   message.className = `form-message ${type}`;
 }
 
+function validatePassword(password) {
+  if (password.length < 8) {
+    return "密码至少需要 8 位。";
+  }
+  if (!/[A-Za-z]/.test(password)) {
+    return "密码需要包含字母。";
+  }
+  if (!/\d/.test(password)) {
+    return "密码需要包含数字。";
+  }
+  return "";
+}
+
 async function register(username, password) {
   const response = await fetch("/auth/register", {
     method: "POST",
@@ -47,6 +60,12 @@ registerForm.addEventListener("submit", async (event) => {
   if (password !== passwordConfirm) {
     setMessage("两次输入的密码不一致。", "error");
     passwordConfirmInput.select();
+    return;
+  }
+  const passwordError = validatePassword(password);
+  if (passwordError) {
+    setMessage(passwordError, "error");
+    passwordInput.select();
     return;
   }
 

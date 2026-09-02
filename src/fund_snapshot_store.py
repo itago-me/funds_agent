@@ -28,6 +28,7 @@ def load_fund_snapshots(
     fund_code: object,
     limit: int = 20,
     *,
+    user_id: int | None = None,
     session_factory: SessionFactory | None = None,
     snapshot_path: Path = SNAPSHOT_PATH,
 ) -> dict[str, object]:
@@ -36,6 +37,7 @@ def load_fund_snapshots(
     snapshots = [
         record
         for record in load_snapshot_records(
+            user_id=user_id,
             session_factory=session_factory,
             snapshot_path=snapshot_path,
         )
@@ -57,6 +59,7 @@ def load_fund_snapshot_trend(
     *,
     start_date: date | None = None,
     end_date: date | None = None,
+    user_id: int | None = None,
     limit: int = 100,
     session_factory: SessionFactory | None = None,
 ) -> dict[str, object]:
@@ -70,6 +73,8 @@ def load_fund_snapshot_trend(
             filters.append(FundSnapshot.report_date >= start_date)
         if end_date is not None:
             filters.append(FundSnapshot.report_date <= end_date)
+        if user_id is not None:
+            filters.append(FundSnapshot.user_id == user_id)
 
         total = session.execute(
             select(func.count()).select_from(FundSnapshot).where(*filters)
@@ -146,6 +151,7 @@ def build_fund_snapshot_trend_summary(
 def load_snapshot_records(
     *,
     limit: int | None = None,
+    user_id: int | None = None,
     session_factory: SessionFactory | None = None,
     snapshot_path: Path = SNAPSHOT_PATH,
 ) -> list[dict[str, object]]:
@@ -154,22 +160,32 @@ def load_snapshot_records(
 
     try:
         with factory() as session:
-            snapshots = session.execute(
-                select(FundSnapshot).order_by(FundSnapshot.id.asc())
-            ).scalars().all()
+            query = select(FundSnapshot).order_by(FundSnapshot.id.asc())
+            if user_id is not None:
+                query = query.where(FundSnapshot.user_id == user_id)
+            snapshots = session.execute(query).scalars().all()
             if snapshots:
                 return _apply_limit(
                     [_record_from_model(snapshot) for snapshot in snapshots],
                     limit,
                 )
 
+            if user_id is not None:
+                return []
             if jsonl_records:
                 return _apply_limit(
                     _seed_database_from_jsonl(session, jsonl_records),
                     limit,
                 )
     except Exception:
-        return _apply_limit(jsonl_records, limit)
+        return _apply_limit(
+            [
+                record
+                for record in jsonl_records
+                if _record_matches_user_id(record, user_id)
+            ],
+            limit,
+        )
 
     return []
 
@@ -186,6 +202,7 @@ def append_fund_snapshots(
     report_date: str,
     data_source: str,
     *,
+    user_id: int | None = None,
     session_factory: SessionFactory | None = None,
     snapshot_path: Path = SNAPSHOT_PATH,
 ) -> None:
@@ -203,6 +220,7 @@ def append_fund_snapshots(
             "daily_change_percent": _json_number(fund.get("daily_change_percent")),
             "risk_level": fund.get("risk_level"),
             "change_summary": fund.get("change_summary"),
+            **({"user_id": user_id} if user_id is not None else {}),
         }
         for fund in funds
     ]
@@ -221,12 +239,14 @@ def append_fund_snapshots(
 
 def load_latest_snapshots_by_code(
     *,
+    user_id: int | None = None,
     session_factory: SessionFactory | None = None,
     snapshot_path: Path = SNAPSHOT_PATH,
 ) -> dict[str, dict[str, object]]:
     snapshots: dict[str, dict[str, object]] = {}
 
     for record in load_snapshot_records(
+        user_id=user_id,
         session_factory=session_factory,
         snapshot_path=snapshot_path,
     ):
@@ -338,6 +358,12 @@ def _load_records_from_jsonl(path: Path) -> list[dict[str, object]]:
     return records
 
 
+def _record_matches_user_id(record: dict[str, object], user_id: int | None) -> bool:
+    if user_id is None:
+        return True
+    return record.get("user_id") == user_id
+
+
 def _append_jsonl_records(
     path: Path,
     records: list[dict[str, object]],
@@ -363,6 +389,7 @@ def _seed_database_from_jsonl(
 
 def _model_from_record(record: dict[str, object]) -> FundSnapshot:
     return FundSnapshot(
+        user_id=_optional_int(record.get("user_id")),
         created_at=_parse_datetime(record.get("created_at")),
         report_date=_parse_date(record.get("report_date")),
         data_source=str(record.get("data_source") or ""),
@@ -378,8 +405,9 @@ def _model_from_record(record: dict[str, object]) -> FundSnapshot:
 
 
 def _record_from_model(snapshot: FundSnapshot) -> dict[str, object]:
-    return {
+    record: dict[str, object] = {
         "snapshot_id": snapshot.id,
+        "user_id": snapshot.user_id,
         "created_at": _format_datetime(snapshot.created_at),
         "report_date": _format_date(snapshot.report_date),
         "data_source": snapshot.data_source,
@@ -392,6 +420,7 @@ def _record_from_model(snapshot: FundSnapshot) -> dict[str, object]:
         "risk_level": snapshot.risk_level,
         "change_summary": snapshot.change_summary,
     }
+    return {key: value for key, value in record.items() if value is not None}
 
 
 def _parse_datetime(value: object | None) -> datetime:
@@ -457,3 +486,9 @@ def _optional_string(value: object | None) -> str | None:
         return None
     text = str(value)
     return text if text else None
+
+
+def _optional_int(value: object | None) -> int | None:
+    if value in (None, ""):
+        return None
+    return int(value)

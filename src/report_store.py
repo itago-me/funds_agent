@@ -133,6 +133,8 @@ def _append_jsonl_record(path: Path, record: dict[str, object]) -> None:
         "warnings": record["warnings"],
         "history_comparison": record["history_comparison"],
     }
+    if record.get("user_id") is not None:
+        backup_record["user_id"] = record["user_id"]
     with path.open("a", encoding="utf-8") as file:
         file.write(json.dumps(backup_record, ensure_ascii=False) + "\n")
 

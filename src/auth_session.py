@@ -30,6 +30,10 @@ def _session_ttl_seconds() -> int:
         return DEFAULT_SESSION_TTL_SECONDS
 
 
+def get_session_ttl_seconds() -> int:
+    return _session_ttl_seconds()
+
+
 def build_session_key(session_id: str) -> str:
     if not session_id:
         raise ValueError("session_id must not be empty")

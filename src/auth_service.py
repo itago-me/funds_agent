@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-from typing import Any, Callable
+from typing import Annotated, Any, Callable
 
-from fastapi import HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -13,7 +13,11 @@ from src.auth_session import SESSION_COOKIE_NAME, read_session_user_id
 from src.authorization import ROLE_ADMIN, ROLE_USER
 from src.db import get_session_factory
 from src.models import User
-from src.password_service import hash_password, verify_password
+from src.password_service import (
+    hash_password,
+    validate_password_policy,
+    verify_password,
+)
 
 
 SessionFactory = Callable[[], AbstractContextManager]
@@ -61,6 +65,8 @@ def register_user(
         raise ValueError("Username must not be empty.")
     if not password:
         raise ValueError("Password must not be empty.")
+
+    validate_password_policy(password)
 
     factory = session_factory or get_session_factory()
     session = factory()
@@ -154,3 +160,7 @@ def authorize_admin_user(user: User) -> User:
             detail="Administrator role required.",
         )
     return user
+
+
+AuthenticatedUser = Annotated[User, Depends(require_authenticated_user)]
+AdminUser = Annotated[User, Depends(require_admin_user)]

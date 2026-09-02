@@ -21,6 +21,7 @@ def lookup_fund(
     fund_code: object,
     use_real_data: bool = True,
     *,
+    user_id: int | None = None,
     redis_client_factory: RedisClientFactory | None = None,
     ttl_seconds: int = DEFAULT_FUND_LOOKUP_CACHE_TTL_SECONDS,
 ) -> dict[str, object]:
@@ -28,6 +29,7 @@ def lookup_fund(
     cache_key = build_fund_lookup_cache_key(
         fund_code=normalized_code,
         use_real_data=use_real_data,
+        user_id=user_id,
     )
     cached_result = load_cached_fund_lookup(
         cache_key=cache_key,
@@ -52,7 +54,7 @@ def lookup_fund(
         raise LookupError(f"Fund code not found: {normalized_code}")
 
     funds = enrich_funds_with_risk(funds)
-    previous_snapshots = load_latest_snapshots_by_code()
+    previous_snapshots = load_latest_snapshots_by_code(user_id=user_id)
     funds = enrich_funds_with_snapshot_comparison(
         funds=funds,
         previous_snapshots=previous_snapshots,
@@ -85,8 +87,11 @@ def build_fund_lookup_cache_key(
     *,
     fund_code: str,
     use_real_data: bool,
+    user_id: int | None = None,
 ) -> str:
     source = "real" if use_real_data else "sample"
+    if user_id is not None:
+        return f"fund:lookup:user:{user_id}:{fund_code}:{source}"
     return f"fund:lookup:{fund_code}:{source}"
 
 

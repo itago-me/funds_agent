@@ -171,8 +171,13 @@ def _find_report_id_for_record(session: object, record: dict[str, object]) -> in
     if not report_path:
         return None
 
+    query = select(Report.id).where(Report.report_path == report_path)
+    user_id = record.get("user_id")
+    if user_id is not None:
+        query = query.where(Report.user_id == user_id)
+
     result = session.execute(
-        select(Report.id).where(Report.report_path == report_path)
+        query.order_by(Report.id.desc()).limit(1)
     ).scalar_one_or_none()
     return int(result) if result is not None else None
 
@@ -427,7 +432,10 @@ def update_task_run_status(
             task_run.report_path = normalized_report_path
             task_run.report_id = _find_report_id_for_record(
                 session,
-                {"report_path": normalized_report_path},
+                {
+                    "report_path": normalized_report_path,
+                    "user_id": task_run.user_id,
+                },
             )
         if warnings is not None:
             task_run.warnings = warnings
@@ -456,6 +464,7 @@ def _enrich_task_record_with_report_lookup(
 ) -> dict[str, object]:
     report_lookup_by_id, report_lookup_by_path = _build_report_lookup(
         report_index_path=report_index_path,
+        user_id=record.get("user_id") if isinstance(record.get("user_id"), int) else None,
         session_factory=session_factory,
     )
     return _enrich_report_link(

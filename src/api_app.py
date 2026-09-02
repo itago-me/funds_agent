@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from datetime import date
+import logging
 import os
 from threading import Lock
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi import FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -24,18 +25,25 @@ from src.fund_snapshot_store import (
 )
 from src.database_status import load_database_status
 from src.auth_service import (
+    AdminUser,
+    AuthenticatedUser,
     authenticate_user,
     load_current_user,
     public_user_payload,
     register_user,
-    require_admin_user,
-    require_authenticated_user,
     UsernameAlreadyExistsError,
 )
 from src.auth_session import (
     SESSION_COOKIE_NAME,
     create_session,
     delete_session,
+    get_session_ttl_seconds,
+)
+from src.audit_log_service import record_audit_event
+from src.auth_throttle import (
+    clear_throttle_attempts,
+    is_throttle_limited,
+    record_throttle_attempt,
 )
 from src.authorization import ROLE_ADMIN
 from src.models import User
@@ -80,6 +88,7 @@ TASK_LOG_PATH = BASE_DIR / "logs" / "task_runs.jsonl"
 SNAPSHOT_PATH = BASE_DIR / "data" / "fund_snapshots.jsonl"
 WEB_DIR = BASE_DIR / "web"
 REPORT_RUN_LOCK = Lock()
+logger = logging.getLogger(__name__)
 
 
 def _user_id_or_none(current_user: User | None) -> int | None:
@@ -151,6 +160,12 @@ app = FastAPI(
 )
 
 
+LOGIN_THROTTLE_LIMIT = 5
+LOGIN_THROTTLE_WINDOW_SECONDS = 10 * 60
+REGISTER_THROTTLE_LIMIT = 3
+REGISTER_THROTTLE_WINDOW_SECONDS = 15 * 60
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -158,7 +173,7 @@ def health() -> dict[str, str]:
 
 @app.get("/database/status")
 def get_database_status(
-    _current_user: User = Depends(require_admin_user),
+    _current_user: AdminUser = None,
 ) -> dict[str, object]:
     try:
         return load_database_status()
@@ -171,7 +186,7 @@ def get_database_status(
 
 @app.get("/redis/status")
 def get_redis_status(
-    _current_user: User = Depends(require_admin_user),
+    _current_user: AdminUser = None,
 ) -> dict[str, object]:
     try:
         return check_redis_connection()
@@ -192,21 +207,73 @@ def _auth_cookie_secure() -> bool:
 
 
 @app.post("/auth/login")
-def login(request: LoginRequest, response: Response) -> dict[str, object]:
+def login(
+    request: LoginRequest,
+    http_request: Request,
+    response: Response,
+) -> dict[str, object]:
+    throttle_subject = _login_throttle_subject(http_request, request.username)
+    if is_throttle_limited(
+        action="login",
+        subject=throttle_subject,
+        limit=LOGIN_THROTTLE_LIMIT,
+    ):
+        _write_audit_event(
+            action="login_failure",
+            success=False,
+            request=http_request,
+            details={
+                "username": request.username.strip(),
+                "reason": "rate_limited",
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Please try again later.",
+        )
+
     user = authenticate_user(request.username, request.password)
     if user is None:
+        attempts = record_throttle_attempt(
+            action="login",
+            subject=throttle_subject,
+            ttl_seconds=LOGIN_THROTTLE_WINDOW_SECONDS,
+        )
+        _write_audit_event(
+            action="login_failure",
+            success=False,
+            request=http_request,
+            details={"username": request.username.strip()},
+        )
+        if attempts >= LOGIN_THROTTLE_LIMIT:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many login attempts. Please try again later.",
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password.",
         )
 
-    session_id = create_session(user_id=user.id)
+    session_id = create_session(
+        user_id=user.id,
+        ttl_seconds=get_session_ttl_seconds(),
+    )
+    clear_throttle_attempts(action="login", subject=throttle_subject)
+    _write_audit_event(
+        action="login_success",
+        success=True,
+        request=http_request,
+        actor_user_id=user.id,
+        details={"username": user.username},
+    )
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=session_id,
         httponly=True,
         secure=_auth_cookie_secure(),
         samesite="lax",
+        max_age=get_session_ttl_seconds(),
     )
     return {
         "status": "success",
@@ -216,7 +283,19 @@ def login(request: LoginRequest, response: Response) -> dict[str, object]:
 
 
 @app.post("/auth/register", status_code=status.HTTP_201_CREATED)
-def register(request: RegisterRequest) -> dict[str, object]:
+def register(request: RegisterRequest, http_request: Request) -> dict[str, object]:
+    throttle_subject = _register_throttle_subject(http_request)
+    attempts = record_throttle_attempt(
+        action="register",
+        subject=throttle_subject,
+        ttl_seconds=REGISTER_THROTTLE_WINDOW_SECONDS,
+    )
+    if attempts > REGISTER_THROTTLE_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many registration attempts. Please try again later.",
+        )
+
     try:
         user = register_user(username=request.username, password=request.password)
     except UsernameAlreadyExistsError as exc:
@@ -235,6 +314,13 @@ def register(request: RegisterRequest) -> dict[str, object]:
             detail="Database is unavailable.",
         ) from exc
 
+    _write_audit_event(
+        action="user_registered",
+        success=True,
+        request=http_request,
+        target_user_id=user.id,
+        details={"username": user.username},
+    )
     return {
         "status": "success",
         "message": "Registration successful.",
@@ -267,7 +353,7 @@ def get_current_user(request: Request) -> dict[str, object]:
 
 @app.get("/admin/users")
 def list_admin_users(
-    _current_user: User = Depends(require_admin_user),
+    _current_user: AdminUser = None,
 ) -> dict[str, object]:
     try:
         users = list_users()
@@ -287,7 +373,8 @@ def list_admin_users(
 def update_admin_user(
     user_id: int,
     request: AdminUserUpdateRequest,
-    current_admin: User = Depends(require_admin_user),
+    current_admin: AdminUser = None,
+    http_request: Request = None,
 ) -> dict[str, object]:
     try:
         user = update_user(
@@ -322,6 +409,25 @@ def update_admin_user(
             detail="Database is unavailable.",
         ) from exc
 
+    if request.role is not None:
+        _write_audit_event(
+            action="user_role_updated",
+            success=True,
+            request=http_request,
+            actor_user_id=current_admin.id,
+            target_user_id=user.id,
+            details={"new_role": user.role},
+        )
+    if request.is_active is not None:
+        _write_audit_event(
+            action="user_status_updated",
+            success=True,
+            request=http_request,
+            actor_user_id=current_admin.id,
+            target_user_id=user.id,
+            details={"is_active": user.is_active},
+        )
+
     return {
         "status": "success",
         "message": "User updated.",
@@ -333,7 +439,8 @@ def update_admin_user(
 def reset_admin_user_password(
     user_id: int,
     request: AdminUserPasswordResetRequest,
-    _current_user: User = Depends(require_admin_user),
+    _current_user: AdminUser = None,
+    http_request: Request = None,
 ) -> dict[str, object]:
     try:
         user = reset_user_password(user_id, request.password)
@@ -353,6 +460,14 @@ def reset_admin_user_password(
             detail="Database is unavailable.",
         ) from exc
 
+    _write_audit_event(
+        action="user_password_reset",
+        success=True,
+        request=http_request,
+        actor_user_id=_current_user.id,
+        target_user_id=user.id,
+        details={"username": user.username},
+    )
     return {
         "status": "success",
         "message": "User password reset.",
@@ -367,6 +482,45 @@ def build_report_run_options(request: ReportRunRequest) -> dict[str, object]:
         "use_real_data": request.use_real_data,
         "use_llm": request.use_llm,
     }
+
+
+def _request_client_host(request: Request | None) -> str:
+    if request is None:
+        return "unknown"
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _login_throttle_subject(request: Request, username: str) -> str:
+    return f"{_request_client_host(request)}:{username.strip().lower()}"
+
+
+def _register_throttle_subject(request: Request) -> str:
+    return _request_client_host(request)
+
+
+def _write_audit_event(
+    *,
+    action: str,
+    success: bool,
+    request: Request | None,
+    actor_user_id: int | None = None,
+    target_user_id: int | None = None,
+    details: dict[str, object] | None = None,
+) -> None:
+    try:
+        record_audit_event(
+            action=action,
+            success=success,
+            actor_user_id=actor_user_id,
+            target_user_id=target_user_id,
+            details=details,
+            ip_address=_request_client_host(request),
+            user_agent=request.headers.get("user-agent") if request else None,
+        )
+    except Exception:
+        logger.warning("Failed to persist audit event: %s", action, exc_info=True)
 
 
 def load_task_run_records(user_id: int | None = None) -> list[dict[str, object]]:
@@ -505,10 +659,14 @@ def build_rerun_request_from_task(task_run: dict[str, object]) -> ReportRunReque
 def get_fund(
     fund_code: str,
     use_real_data: bool = True,
-    _current_user: User = Depends(require_authenticated_user),
+    _current_user: AuthenticatedUser = None,
 ) -> dict[str, object]:
     try:
-        return lookup_fund(fund_code=fund_code, use_real_data=use_real_data)
+        return lookup_fund(
+            fund_code=fund_code,
+            use_real_data=use_real_data,
+            user_id=_user_id_or_none(_current_user),
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -525,10 +683,14 @@ def get_fund(
 def get_fund_snapshots(
     fund_code: str,
     limit: int = 20,
-    _current_user: User = Depends(require_authenticated_user),
+    _current_user: AuthenticatedUser = None,
 ) -> dict[str, object]:
     try:
-        return load_fund_snapshots(fund_code=fund_code, limit=limit)
+        return load_fund_snapshots(
+            fund_code=fund_code,
+            limit=limit,
+            user_id=_user_id_or_none(_current_user),
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -542,7 +704,7 @@ def get_fund_snapshot_trend(
     start_date: date | None = None,
     end_date: date | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
-    _current_user: User = Depends(require_authenticated_user),
+    _current_user: AuthenticatedUser = None,
 ) -> dict[str, object]:
     if start_date is not None and end_date is not None and start_date > end_date:
         raise HTTPException(
@@ -555,6 +717,7 @@ def get_fund_snapshot_trend(
             fund_code=fund_code,
             start_date=start_date,
             end_date=end_date,
+            user_id=_user_id_or_none(_current_user),
             limit=limit,
         )
     except ValueError as exc:
@@ -571,7 +734,7 @@ def get_fund_snapshot_trend(
 
 @app.get("/watchlist")
 def get_watchlist(
-    current_user: User | None = Depends(require_authenticated_user),
+    current_user: AuthenticatedUser = None,
 ) -> dict[str, object]:
     fund_codes = _load_user_watchlist(current_user)
     return {
@@ -584,7 +747,7 @@ def get_watchlist(
 @app.put("/watchlist")
 def update_watchlist(
     request: WatchlistUpdateRequest,
-    current_user: User | None = Depends(require_authenticated_user),
+    current_user: AuthenticatedUser = None,
 ) -> dict[str, object]:
     user_id = _user_id_or_none(current_user)
     if user_id is None:
@@ -603,7 +766,7 @@ def update_watchlist(
 @app.post("/watchlist/funds", status_code=status.HTTP_201_CREATED)
 def add_watchlist_fund(
     request: WatchlistFundRequest,
-    current_user: User | None = Depends(require_authenticated_user),
+    current_user: AuthenticatedUser = None,
 ) -> dict[str, object]:
     try:
         user_id = _user_id_or_none(current_user)
@@ -635,7 +798,7 @@ def add_watchlist_fund(
 @app.delete("/watchlist/funds/{fund_code}")
 def delete_watchlist_fund(
     fund_code: str,
-    current_user: User | None = Depends(require_authenticated_user),
+    current_user: AuthenticatedUser = None,
 ) -> dict[str, object]:
     try:
         user_id = _user_id_or_none(current_user)
@@ -677,7 +840,7 @@ def list_reports(
     fund_code: str | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
-    current_user: User | None = Depends(require_authenticated_user),
+    current_user: AuthenticatedUser = None,
 ) -> dict[str, object]:
     if start_date is not None and end_date is not None and start_date > end_date:
         raise HTTPException(
@@ -710,7 +873,7 @@ def list_reports(
 
 @app.get("/reports/latest")
 def get_latest_report(
-    current_user: User | None = Depends(require_authenticated_user),
+    current_user: AuthenticatedUser = None,
 ) -> dict[str, object]:
     try:
         detail = load_latest_report_detail(**_user_kwargs(current_user))
@@ -729,7 +892,7 @@ def get_latest_report(
 @app.get("/reports/{report_id}")
 def get_report_detail(
     report_id: int,
-    current_user: User | None = Depends(require_authenticated_user),
+    current_user: AuthenticatedUser = None,
 ) -> dict[str, object]:
     try:
         detail = load_report_detail(
@@ -754,7 +917,7 @@ def get_report_detail(
 @app.post("/reports/run", status_code=status.HTTP_201_CREATED)
 def run_report(
     request: ReportRunRequest,
-    current_user: User | None = Depends(require_authenticated_user),
+    current_user: AuthenticatedUser = None,
 ) -> dict[str, object]:
     if request.codes is None and request.use_watchlist and not _load_user_watchlist(current_user):
         raise HTTPException(
@@ -813,7 +976,7 @@ def run_report(
 @app.post("/reports/run-async", status_code=status.HTTP_202_ACCEPTED)
 def enqueue_report_run(
     request: ReportRunRequest,
-    current_user: User | None = Depends(require_authenticated_user),
+    current_user: AuthenticatedUser = None,
 ) -> dict[str, object]:
     if request.codes is None and request.use_watchlist:
         fund_codes = _load_user_watchlist(current_user)
@@ -878,7 +1041,7 @@ def list_task_runs(
     failed_only: bool = False,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
-    current_user: User | None = Depends(require_authenticated_user),
+    current_user: AuthenticatedUser = None,
 ) -> dict[str, object]:
     if start_date is not None and end_date is not None and start_date > end_date:
         raise HTTPException(
@@ -919,7 +1082,7 @@ def list_task_runs(
 
 @app.get("/schedule/status")
 def get_schedule_status(
-    current_user: User | None = Depends(require_authenticated_user),
+    current_user: AuthenticatedUser = None,
 ) -> dict[str, object]:
     return build_schedule_status(user_id=_user_id_or_none(current_user))
 
@@ -927,7 +1090,7 @@ def get_schedule_status(
 @app.get("/task-runs/{task_id}")
 def get_task_run_detail(
     task_id: int,
-    current_user: User | None = Depends(require_authenticated_user),
+    current_user: AuthenticatedUser = None,
 ) -> dict[str, object]:
     task_run = load_task_run_by_id(task_id=task_id, **_user_kwargs(current_user))
     if task_run is None:
@@ -953,7 +1116,7 @@ def get_task_run_detail(
 @app.post("/task-runs/{task_id}/rerun", status_code=status.HTTP_201_CREATED)
 def rerun_task_run(
     task_id: int,
-    current_user: User | None = Depends(require_authenticated_user),
+    current_user: AuthenticatedUser = None,
 ) -> dict[str, object]:
     task_run = load_task_run_by_id(task_id=task_id, **_user_kwargs(current_user))
     if task_run is None:
@@ -979,9 +1142,13 @@ def rerun_task_run(
 @app.get("/fund-snapshots")
 def list_fund_snapshots(
     limit: int = 50,
-    _current_user: User = Depends(require_authenticated_user),
+    _current_user: AuthenticatedUser = None,
 ) -> dict[str, object]:
-    records = load_snapshot_records(limit=limit, snapshot_path=SNAPSHOT_PATH)
+    records = load_snapshot_records(
+        limit=limit,
+        user_id=_user_id_or_none(_current_user),
+        snapshot_path=SNAPSHOT_PATH,
+    )
     return {
         "count": len(records),
         "snapshots": records,
@@ -1009,6 +1176,7 @@ def get_dashboard_page(request: Request) -> FileResponse | RedirectResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
+@app.get("/login.html", include_in_schema=False, response_model=None)
 @app.get("/login", include_in_schema=False, response_model=None)
 def get_login_page(request: Request) -> FileResponse | RedirectResponse:
     if load_current_user(request.cookies.get(SESSION_COOKIE_NAME)) is not None:
@@ -1016,6 +1184,7 @@ def get_login_page(request: Request) -> FileResponse | RedirectResponse:
     return FileResponse(WEB_DIR / "login.html")
 
 
+@app.get("/register.html", include_in_schema=False, response_model=None)
 @app.get("/register", include_in_schema=False, response_model=None)
 def get_register_page(request: Request) -> FileResponse | RedirectResponse:
     if load_current_user(request.cookies.get(SESSION_COOKIE_NAME)) is not None:
